@@ -31,9 +31,17 @@
 $ npm install
 ```
 
-## Compile and run the project
+## Database
+
+The backend uses PostgreSQL through TypeORM. Set `DATABASE_URL` to the PostgreSQL connection string before starting the application, for example:
 
 ```bash
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/mahjonghu npm run start:dev
+```
+
+Entity schema synchronization is disabled; manage schema changes with migrations.
+
+## Compile and run the project
 # development
 $ npm run start
 
