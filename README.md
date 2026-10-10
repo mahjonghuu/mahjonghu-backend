@@ -33,13 +33,13 @@ $ npm install
 
 ## Database
 
-The backend uses PostgreSQL through TypeORM. Set `DATABASE_URL` to the PostgreSQL connection string before starting the application, for example:
+The backend uses PostgreSQL through TypeORM. Nest's `@nestjs/config` `ConfigModule` loads `DATABASE_URL` from this directory's `.env` or the process environment. `TypeOrmModule` and the migration CLI `DataSource` both use `ConfigService`; an environment variable already set by the process takes precedence. Keep the URL private.
 
-```bash
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/mahjonghu npm run start:dev
-```
+The supplied `.env.example` uses the Supabase transaction pooler on port `6543`. Port `5432` is only used if the configured URL explicitly points to it; the PostgreSQL driver falls back to `localhost:5432` when no connection URL was loaded. `migration:show` still needs a reachable database to inspect migration state.
 
-Entity schema synchronization is disabled; manage schema changes with migrations.
+Entity schema synchronization is disabled. The initial schema in [DATABASE.md](DATABASE.md) is encoded in `src/database/migrations/1791590400000-InitialSchema.ts` but has **not been applied**. Importing `src/database/data-source.ts` or starting Nest does not run migrations automatically.
+
+When the database is reachable, explicitly run `npm run migration:run`; this builds the backend, then invokes the TypeORM CLI with the compiled DataSource. Use `npm run migration:show` to inspect pending migrations or `npm run migration:revert` to roll back the latest one. **None of these migration commands were executed to diagnose the connection error.** The rollback drops the five tables and their data; use it only after reviewing the impact.
 
 ## Compile and run the project
 # development
