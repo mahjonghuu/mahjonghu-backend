@@ -1,0 +1,148 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { IsNull, Repository } from 'typeorm';
+import { CreateOutletDto } from './dto/create-outlet.dto.js';
+import { UpdateOutletDto } from './dto/update-outlet.dto.js';
+import { OutletEntity } from './outlet.entity.js';
+
+type OutletSummary = {
+  id: string;
+  name: string;
+  city: string;
+  address: string;
+  active: boolean;
+  tableCount: number;
+  occupiedTableCount: number;
+};
+
+/** Owns outlet validation and persistence for the operational dashboard. */
+@Injectable()
+export class OutletsService {
+  constructor(
+    @InjectRepository(OutletEntity)
+    private readonly outlets: Repository<OutletEntity>,
+  ) {}
+
+  /** Lists non-archived outlets with live table counts. */
+  async findAll(): Promise<OutletSummary[]> {
+    const rows = await this.outlets.query(`
+      SELECT
+        o.id,
+        o.name,
+        o.city,
+        o.address,
+        o.is_active AS active,
+        (SELECT count(*) FROM mahjong_tables t
+          WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
+        (SELECT count(DISTINCT b.table_id) FROM bookings b
+          WHERE b.outlet_id = o.id AND b.status = 'in_progress') AS "occupiedTableCount"
+      FROM outlets o
+      WHERE o.archived_at IS NULL
+      ORDER BY o.created_at ASC, o.id ASC
+    `);
+    return rows.map((row: Record<string, unknown>) => ({
+      id: String(row.id),
+      name: String(row.name),
+      city: String(row.city),
+      address: String(row.address),
+      active: row.active === true,
+      tableCount: Number(row.tableCount),
+      occupiedTableCount: Number(row.occupiedTableCount),
+    }));
+  }
+
+  /** Creates a normalized outlet and maps duplicate active names to HTTP 409. */
+  async create(dto: CreateOutletDto): Promise<OutletEntity> {
+    const outlet = this.outlets.create({
+      name: this.requiredText(dto.name, 'name'),
+      city: this.requiredText(dto.city, 'city'),
+      address: this.requiredText(dto.address, 'address'),
+      isActive: dto.active ?? true,
+    });
+    return this.saveWithConflict(outlet);
+  }
+
+  /** Updates outlet details; in-use bookings prevent deactivation. */
+  async update(id: string, dto: UpdateOutletDto): Promise<OutletEntity> {
+    const outlet = await this.findOne(id);
+    if (dto.name !== undefined)
+      outlet.name = this.requiredText(dto.name, 'name');
+    if (dto.city !== undefined)
+      outlet.city = this.requiredText(dto.city, 'city');
+    if (dto.address !== undefined)
+      outlet.address = this.requiredText(dto.address, 'address');
+    if (
+      dto.active === false &&
+      outlet.isActive &&
+      (await this.hasInProgressBooking(id))
+    ) {
+      throw new ConflictException(
+        'Selesaikan penggunaan meja sebelum menonaktifkan outlet.',
+      );
+    }
+    if (dto.active !== undefined) outlet.isActive = dto.active;
+    return this.saveWithConflict(outlet);
+  }
+
+  /** Archives an outlet only when it has no tables or booking history. */
+  async archive(id: string): Promise<void> {
+    const outlet = await this.findOne(id);
+    const tableRows: { hasTables: boolean }[] = await this.outlets.query(
+      'SELECT EXISTS (SELECT 1 FROM mahjong_tables WHERE outlet_id = $1) AS "hasTables"',
+      [id],
+    );
+    const bookingRows: { hasBookings: boolean }[] = await this.outlets.query(
+      'SELECT EXISTS (SELECT 1 FROM bookings WHERE outlet_id = $1) AS "hasBookings"',
+      [id],
+    );
+    const hasTables = tableRows[0].hasTables;
+    const hasBookings = bookingRows[0].hasBookings;
+    if (hasTables || hasBookings) {
+      throw new ConflictException(
+        'Outlet masih memiliki meja atau riwayat reservasi dan tidak dapat dihapus.',
+      );
+    }
+    outlet.isActive = false;
+    outlet.archivedAt = new Date();
+    await this.outlets.save(outlet);
+  }
+
+  private async findOne(id: string): Promise<OutletEntity> {
+    const outlet = await this.outlets.findOneBy({ id, archivedAt: IsNull() });
+    if (!outlet) throw new NotFoundException('Outlet tidak ditemukan.');
+    return outlet;
+  }
+
+  private requiredText(value: string, field: string): string {
+    const normalized = value.trim();
+    if (!normalized)
+      throw new BadRequestException(`${field} tidak boleh kosong.`);
+    return normalized;
+  }
+
+  private async hasInProgressBooking(outletId: string): Promise<boolean> {
+    const [{ occupied }] = (await this.outlets.query(
+      "SELECT EXISTS (SELECT 1 FROM bookings WHERE outlet_id = $1 AND status = 'in_progress') AS occupied",
+      [outletId],
+    )) as [{ occupied: boolean }];
+    return occupied;
+  }
+
+  private async saveWithConflict(outlet: OutletEntity): Promise<OutletEntity> {
+    try {
+      return await this.outlets.save(outlet);
+    } catch (error) {
+      const driverError = (error as { driverError?: { code?: string } })
+        .driverError;
+      if (driverError?.code === '23505') {
+        throw new ConflictException('Nama outlet sudah digunakan.');
+      }
+      throw error;
+    }
+  }
+}

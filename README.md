@@ -38,6 +38,9 @@ The backend uses PostgreSQL through TypeORM. Nest's `@nestjs/config` `ConfigModu
 The supplied `.env.example` uses the Supabase transaction pooler on port `6543`. Port `5432` is only used if the configured URL explicitly points to it; the PostgreSQL driver falls back to `localhost:5432` when no connection URL was loaded. `migration:show` still needs a reachable database to inspect migration state.
 
 Entity schema synchronization is disabled. The initial schema in [DATABASE.md](DATABASE.md) is encoded in `src/database/migrations/1791590400000-InitialSchema.ts` but has **not been applied**. Importing `src/database/data-source.ts` or starting Nest does not run migrations automatically.
+The outlet CRUD API is currently unauthenticated for local development only. Nest listens on `127.0.0.1`, enables CORS for `WEB_ORIGIN` (default `http://localhost:3000`), and refuses to start with `NODE_ENV=production`. Do not expose or deploy it until owner authentication and authorization are implemented.
+ 
+`GET /outlets` lists non-archived outlets with table and occupied-table counts. `POST /outlets`, `PATCH /outlets/:id`, and `DELETE /outlets/:id` create, update, and archive outlets. `DELETE` returns `409 Conflict` if tables or booking history still reference the outlet.
 
 When the database is reachable, explicitly run `npm run migration:run`; this builds the backend, then invokes the TypeORM CLI with the compiled DataSource. Use `npm run migration:show` to inspect pending migrations or `npm run migration:revert` to roll back the latest one. **None of these migration commands were executed to diagnose the connection error.** The rollback drops the five tables and their data; use it only after reviewing the impact.
 
