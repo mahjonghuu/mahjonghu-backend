@@ -42,6 +42,8 @@ The outlet CRUD API is currently unauthenticated for local development only. Nes
  
 `GET /outlets` lists non-archived outlets with table and occupied-table counts. `POST /outlets`, `PATCH /outlets/:id`, and `DELETE /outlets/:id` create, update, and archive outlets. `DELETE` returns `409 Conflict` if tables or booking history still reference the outlet.
 
+Each request is logged as structured JSON by the `HTTP` logger with its request ID, method, path (without query parameters), response status, and duration. A valid UUID from `X-Request-ID` is reused; otherwise the backend generates one and returns it in the response header. 4xx and 5xx responses use warning and error log levels respectively. Request bodies and headers are not logged.
+
 When the database is reachable, explicitly run `npm run migration:run`; this builds the backend, then invokes the TypeORM CLI with the compiled DataSource. Use `npm run migration:show` to inspect pending migrations or `npm run migration:revert` to roll back the latest one. **None of these migration commands were executed to diagnose the connection error.** The rollback drops the five tables and their data; use it only after reviewing the impact.
 
 ## Compile and run the project
