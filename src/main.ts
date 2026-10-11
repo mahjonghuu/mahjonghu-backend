@@ -5,15 +5,13 @@ import { AppModule } from './app.module.js';
 import { requestLoggingMiddleware } from './common/request-logging.middleware.js';
 
 async function bootstrap() {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'Outlet endpoints are unauthenticated and may only run in local development.',
-    );
-  }
   const app = await NestFactory.create(AppModule);
   app.use(requestLoggingMiddleware);
   const config = app.get(ConfigService);
-  app.enableCors({ origin: config.get('WEB_ORIGIN', 'http://localhost:3000') });
+  app.enableCors({
+    origin: config.get('WEB_ORIGIN', 'http://localhost:3000'),
+    credentials: true,
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,

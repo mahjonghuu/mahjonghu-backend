@@ -17,4 +17,4 @@ Owns mahjong table management for the local dashboard API. Occupancy is derived 
 - `dto/`: create and update request validation.
 - `tables.service.spec.ts`: unit test for status precedence and database rate conversion.
 
-The API is unauthenticated and restricted to local development; do not expose it without authorization.
+All table routes require an active owner JWT in `Authorization: Bearer <token>`. Obtain a token from `POST /auth/login`; owner accounts are provisioned only by a trusted administrator.

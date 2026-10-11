@@ -1,3 +1,5 @@
+import { UseGuards } from '@nestjs/common';
+import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import {
   Body,
   Controller,
@@ -16,6 +18,7 @@ import { OutletsService } from './outlets.service.js';
 
 /** Local development API for outlet management; add owner authentication before deployment. */
 @Controller('outlets')
+@UseGuards(JWTAuthGuard)
 export class OutletsController {
   constructor(private readonly outlets: OutletsService) {}
 

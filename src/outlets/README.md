@@ -17,4 +17,4 @@ Owns outlet CRUD, operational status, and archive rules for the local dashboard 
 - `dto/`: create and update request validation.
 - `outlets.service.spec.ts`: service unit tests for summary mapping, normalization, booking constraints, archive rules, and duplicate names.
 
-The API is unauthenticated and restricted to local development; do not expose it without authorization.
+All outlet routes require an active owner JWT in `Authorization: Bearer <token>`. Obtain a token from `POST /auth/login`; owner accounts are provisioned only by a trusted administrator.

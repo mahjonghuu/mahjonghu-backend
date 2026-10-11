@@ -1,3 +1,5 @@
+import { UseGuards } from '@nestjs/common';
+import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import {
   Body,
   Controller,
@@ -16,6 +18,7 @@ import { TablesService } from './tables.service.js';
 
 /** Local development API for mahjong table management. */
 @Controller('tables')
+@UseGuards(JWTAuthGuard)
 export class TablesController {
   constructor(private readonly tables: TablesService) {}
 

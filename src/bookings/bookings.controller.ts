@@ -1,3 +1,5 @@
+import { UseGuards } from '@nestjs/common';
+import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { BookingAvailabilityDto } from './dto/booking-availability.dto.js';
 import { CreateBookingDto } from './dto/create-booking.dto.js';
@@ -9,6 +11,7 @@ export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}
 
   /** Lists persisted bookings for the internal dashboard. */
+  @UseGuards(JWTAuthGuard)
   @Get()
   findAllForDashboard() {
     return this.bookings.findAllForDashboard();
