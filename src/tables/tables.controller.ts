@@ -18,23 +18,30 @@ import { TablesService } from './tables.service.js';
 
 /** Local development API for mahjong table management. */
 @Controller('tables')
-@UseGuards(JWTAuthGuard)
 export class TablesController {
   constructor(private readonly tables: TablesService) {}
 
+  /** Lists active tables for public outlet discovery. */
+  @Get('public')
+  findPublic() {
+    return this.tables.findPublic();
+  }
+
   /** Returns active tables with occupancy derived from live bookings. */
+  @UseGuards(JWTAuthGuard)
   @Get()
   findAll() {
     return this.tables.findAll();
   }
 
-  /** Creates a table. */
+  @UseGuards(JWTAuthGuard)
   @Post()
   create(@Body() dto: CreateTableDto) {
     return this.tables.create(dto);
   }
 
   /** Updates a table's editable fields. */
+  @UseGuards(JWTAuthGuard)
   @Patch(':id')
   update(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -44,6 +51,7 @@ export class TablesController {
   }
 
   /** Archives a table without booking history. */
+  @UseGuards(JWTAuthGuard)
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async archive(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {

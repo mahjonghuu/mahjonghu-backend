@@ -56,6 +56,30 @@ export class OutletsService {
     }));
   }
 
+  /** Lists active, non-archived outlets for public discovery. */
+  async findPublic(): Promise<OutletSummary[]> {
+    const rows = await this.outlets.query(`
+      SELECT
+        o.id, o.name, o.city, o.address, o.is_active AS active,
+        (SELECT count(*) FROM mahjong_tables t
+          WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
+        (SELECT count(DISTINCT b.table_id) FROM bookings b
+          WHERE b.outlet_id = o.id AND b.status = 'in_progress') AS "occupiedTableCount"
+      FROM outlets o
+      WHERE o.archived_at IS NULL AND o.is_active = true
+      ORDER BY o.created_at ASC, o.id ASC
+    `);
+    return rows.map((row: Record<string, unknown>) => ({
+      id: String(row.id),
+      name: String(row.name),
+      city: String(row.city),
+      address: String(row.address),
+      active: row.active === true,
+      tableCount: Number(row.tableCount),
+      occupiedTableCount: Number(row.occupiedTableCount),
+    }));
+  }
+
   /** Creates a normalized outlet and maps duplicate active names to HTTP 409. */
   async create(dto: CreateOutletDto): Promise<OutletEntity> {
     const outlet = this.outlets.create({

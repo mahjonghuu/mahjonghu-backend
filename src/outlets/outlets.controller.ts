@@ -18,23 +18,31 @@ import { OutletsService } from './outlets.service.js';
 
 /** Local development API for outlet management; add owner authentication before deployment. */
 @Controller('outlets')
-@UseGuards(JWTAuthGuard)
 export class OutletsController {
   constructor(private readonly outlets: OutletsService) {}
 
   /** Returns outlets that have not been archived. */
+  @UseGuards(JWTAuthGuard)
   @Get()
   findAll() {
     return this.outlets.findAll();
   }
 
+  /** Returns active outlets for public discovery. */
+  @Get('public')
+  findPublic() {
+    return this.outlets.findPublic();
+  }
+
   /** Creates an outlet. */
+  @UseGuards(JWTAuthGuard)
   @Post()
   create(@Body() dto: CreateOutletDto) {
     return this.outlets.create(dto);
   }
 
   /** Updates an outlet's editable fields. */
+  @UseGuards(JWTAuthGuard)
   @Patch(':id')
   update(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -43,7 +51,7 @@ export class OutletsController {
     return this.outlets.update(id, dto);
   }
 
-  /** Archives an outlet that has no tables or booking history. */
+  @UseGuards(JWTAuthGuard)
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async archive(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {

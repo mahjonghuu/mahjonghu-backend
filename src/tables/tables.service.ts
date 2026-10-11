@@ -47,6 +47,24 @@ export class TablesService {
     return rows.map((row: Record<string, unknown>) => this.toRecord(row));
   }
 
+  /** Lists tables for public discovery, excluding inactive outlets. */
+  async findPublic(): Promise<TableRecord[]> {
+    const rows = await this.tables.query(`
+      SELECT t.id, t.outlet_id AS "outletId", t.name,
+        t.hourly_rate_idr AS rate, t.condition,
+        EXISTS (
+          SELECT 1 FROM bookings b
+          WHERE b.table_id = t.id AND b.outlet_id = t.outlet_id
+            AND b.status = 'in_progress'
+        ) AS occupied
+      FROM mahjong_tables t
+      JOIN outlets o ON o.id = t.outlet_id
+      WHERE t.archived_at IS NULL AND o.archived_at IS NULL AND o.is_active = true
+      ORDER BY t.created_at ASC, t.id ASC
+    `);
+    return rows.map((row: Record<string, unknown>) => this.toRecord(row));
+  }
+
   /** Creates a table in an active outlet. */
   async create(dto: CreateTableDto): Promise<TableRecord> {
     const outlet = await this.outlets.findOneBy({

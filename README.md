@@ -41,8 +41,8 @@ VALUES ($1, lower(btrim($2)), $3, 'owner', true);
 - `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile. Tokens are not exposed in the JSON response. Invalid credentials and non-owner accounts receive the same `401` response.
 - `POST /auth/logout` clears the session cookie.
 - `GET /auth/me` validates the JWT cookie or `Authorization: Bearer <token>` (used by the Next.js proxy).
-- `GET/POST/PATCH/DELETE /outlets` and `GET/POST/PATCH/DELETE /tables` require an owner JWT.
-- `GET /bookings` (internal booking list, containing customer contact data) requires an owner JWT. Public booking availability and booking creation remain public.
+- `GET /outlets/public` lists active, non-archived outlets for public discovery. `GET /outlets` and all outlet mutations require an owner JWT.
+- `GET /tables/public` lists tables belonging to active, non-archived outlets. `GET /tables` and all table mutations require an owner JWT.
 - Role authorization is enforced by the backend from verified JWT claims. The Next.js `proxy.ts` also asks the backend to validate the session before serving dashboard routes; backend API guards remain the authorization boundary.
 
 Browser requests use credentialed CORS from the configured `WEB_ORIGIN`. The web app and API must be same-site for the strict cookie policy; cookie-authenticated mutations also require the exact configured origin. JWT signing and verification require `JWT_SECRET`; the application refuses to start without it.
