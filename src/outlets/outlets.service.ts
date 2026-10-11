@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { CreateOutletDto } from './dto/create-outlet.dto.js';
 import { UpdateOutletDto } from './dto/update-outlet.dto.js';
-import { OutletEntity } from './outlet.entity.js';
+import { OutletEntity } from './entities/outlet.entity.js';
 
 type OutletSummary = {
   id: string;

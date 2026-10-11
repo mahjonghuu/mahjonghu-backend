@@ -5,10 +5,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
-import { OutletEntity } from '../outlets/outlet.entity.js';
+import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 import { CreateTableDto } from './dto/create-table.dto.js';
 import { UpdateTableDto } from './dto/update-table.dto.js';
-import { TableEntity } from './table.entity.js';
+import { TableEntity } from './entities/table.entity.js';
 
 type TableStatus = 'Tersedia' | 'Digunakan' | 'Perawatan';
 type TableRecord = {
