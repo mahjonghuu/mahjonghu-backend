@@ -38,9 +38,11 @@ The backend uses PostgreSQL through TypeORM. Nest's `@nestjs/config` `ConfigModu
 The supplied `.env.example` uses the Supabase transaction pooler on port `6543`. Port `5432` is only used if the configured URL explicitly points to it; the PostgreSQL driver falls back to `localhost:5432` when no connection URL was loaded. `migration:show` still needs a reachable database to inspect migration state.
 
 Entity schema synchronization is disabled. The initial schema in [DATABASE.md](DATABASE.md) is encoded in `src/database/migrations/1791590400000-InitialSchema.ts` but has **not been applied**. Importing `src/database/data-source.ts` or starting Nest does not run migrations automatically.
-The outlet CRUD API is currently unauthenticated for local development only. Nest listens on `127.0.0.1`, enables CORS for `WEB_ORIGIN` (default `http://localhost:3000`), and refuses to start with `NODE_ENV=production`. Do not expose or deploy it until owner authentication and authorization are implemented.
- 
+The outlet and table APIs are unauthenticated and intended for local development only. Nest listens on `127.0.0.1`, enables CORS for `WEB_ORIGIN` (default `http://localhost:3000`), and refuses to start with `NODE_ENV=production`. Do not expose or deploy them until owner authentication and authorization are implemented.
+
 `GET /outlets` lists non-archived outlets with table and occupied-table counts. `POST /outlets`, `PATCH /outlets/:id`, and `DELETE /outlets/:id` create, update, and archive outlets. `DELETE` returns `409 Conflict` if tables or booking history still reference the outlet.
+
+`GET /tables` lists non-archived tables with `Tersedia`, `Perawatan`, or booking-derived `Digunakan` status. `POST /tables`, `PATCH /tables/:id`, and `DELETE /tables/:id` create, update, and archive tables. Occupancy cannot be set manually; table archive returns `409 Conflict` when any booking history references it.
 
 Each request is logged as structured JSON by the `HTTP` logger with its request ID, method, path (without query parameters), response status, and duration. A valid UUID from `X-Request-ID` is reused; otherwise the backend generates one and returns it in the response header. 4xx and 5xx responses use warning and error log levels respectively. Request bodies and headers are not logged.
 

@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { OutletsModule } from './outlets/outlets.module.js';
+import { TablesModule } from './tables/tables.module.js';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { OutletsModule } from './outlets/outlets.module.js';
         synchronize: false,
       }),
     }),
+    TablesModule,
     OutletsModule,
   ],
   controllers: [AppController],

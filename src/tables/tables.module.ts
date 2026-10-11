@@ -1,0 +1,14 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { OutletEntity } from '../outlets/outlet.entity.js';
+import { TableEntity } from './table.entity.js';
+import { TablesController } from './tables.controller.js';
+import { TablesService } from './tables.service.js';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([TableEntity, OutletEntity])],
+  controllers: [TablesController],
+  providers: [TablesService],
+  exports: [TablesService],
+})
+export class TablesModule {}
