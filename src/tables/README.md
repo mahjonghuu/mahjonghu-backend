@@ -1,0 +1,20 @@
+# Tables Module
+
+Owns mahjong table management for the local dashboard API. Occupancy is derived from in-progress bookings and is not stored as a manually editable table status.
+
+## API
+
+- `GET /tables` lists non-archived tables belonging to non-archived outlets. Status is `Digunakan` for an in-progress booking, `Perawatan` for a maintenance condition, and otherwise `Tersedia`.
+- `POST /tables` creates a table for an active outlet with a positive hourly rate.
+- `PATCH /tables/:id` updates the name, hourly rate, and available/maintenance condition. Outlet assignment cannot be changed.
+- `DELETE /tables/:id` archives a table and returns `204 No Content`. It returns `409 Conflict` if any booking history references the table.
+
+## Structure
+
+- `tables.controller.ts`: HTTP routes and UUID/body validation.
+- `tables.service.ts`: table queries, persistence, and booking-derived status rules.
+- `entities/table.entity.ts`: TypeORM mapping for the `mahjong_tables` table.
+- `dto/`: create and update request validation.
+- `tables.service.spec.ts`: unit test for status precedence and database rate conversion.
+
+The API is unauthenticated and restricted to local development; do not expose it without authorization.
