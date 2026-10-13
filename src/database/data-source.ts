@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { AddDokuPaymentSessions1791763200000 } from './migrations/1791763200000-AddDokuPaymentSessions.js';
 import { InitialSchema1791590400000 } from './migrations/1791590400000-InitialSchema.js';
 import { AddPasswordHashToUsers1791676800000 } from './migrations/1791676800000-AddPasswordHashToUsers.js';
+import { AddOutletOperatingHours1791849600000 } from './migrations/1791849600000-AddOutletOperatingHours.js';
 
 // TypeORM CLI does not bootstrap Nest, so initialize Nest ConfigModule explicitly before the DataSource.
 await ConfigModule.forRoot({
@@ -22,5 +23,6 @@ export default new DataSource({
     InitialSchema1791590400000,
     AddPasswordHashToUsers1791676800000,
     AddDokuPaymentSessions1791763200000,
+    AddOutletOperatingHours1791849600000,
   ],
 });

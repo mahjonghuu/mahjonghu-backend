@@ -1,8 +1,11 @@
 import {
   IsBoolean,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 
@@ -26,4 +29,16 @@ export class CreateOutletDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  openingHour?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  closingHour?: number;
 }

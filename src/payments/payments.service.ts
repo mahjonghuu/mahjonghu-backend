@@ -83,7 +83,12 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
           where: { id: dto.outletId, isActive: true, archivedAt: IsNull() },
         });
         if (!outlet) throw new NotFoundException('Outlet tidak ditemukan.');
-        this.validateRequestedSessions(dto, outlet.timezone);
+        this.validateRequestedSessions(
+          dto,
+          outlet.timezone,
+          outlet.openingHour,
+          outlet.closingHour,
+        );
 
         const requestedTableIds = [
           ...new Set(dto.sessions.map((item) => item.tableId)),
@@ -532,9 +537,10 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   private validateRequestedSessions(
     dto: CreateDokuCheckoutDto,
     timeZone: string,
+    openingHour: number,
+    closingHour: number,
   ) {
     const formatter = new Intl.DateTimeFormat('en-GB', {
-      timeZone,
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
@@ -555,8 +561,8 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
         !Number.isSafeInteger(
           startsAt.getTime() + session.durationHours * 3_600_000,
         ) ||
-        localHour < 12 ||
-        localHour + session.durationHours > 22 ||
+        localHour < openingHour ||
+        localHour + session.durationHours > closingHour ||
         localPart('minute') !== 0 ||
         localPart('second') !== 0 ||
         startsAt.getUTCMilliseconds() !== 0

@@ -16,6 +16,8 @@ type OutletSummary = {
   city: string;
   address: string;
   active: boolean;
+  openingHour: number;
+  closingHour: number;
   tableCount: number;
   occupiedTableCount: number;
 };
@@ -37,6 +39,8 @@ export class OutletsService {
         o.city,
         o.address,
         o.is_active AS active,
+        o.opening_hour AS "openingHour",
+        o.closing_hour AS "closingHour",
         (SELECT count(*) FROM mahjong_tables t
           WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
         (SELECT count(DISTINCT b.table_id) FROM bookings b
@@ -51,6 +55,8 @@ export class OutletsService {
       city: String(row.city),
       address: String(row.address),
       active: row.active === true,
+      openingHour: Number(row.openingHour),
+      closingHour: Number(row.closingHour),
       tableCount: Number(row.tableCount),
       occupiedTableCount: Number(row.occupiedTableCount),
     }));
@@ -61,6 +67,7 @@ export class OutletsService {
     const rows = await this.outlets.query(`
       SELECT
         o.id, o.name, o.city, o.address, o.is_active AS active,
+        o.opening_hour AS "openingHour", o.closing_hour AS "closingHour",
         (SELECT count(*) FROM mahjong_tables t
           WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
         (SELECT count(DISTINCT b.table_id) FROM bookings b
@@ -75,6 +82,8 @@ export class OutletsService {
       city: String(row.city),
       address: String(row.address),
       active: row.active === true,
+      openingHour: Number(row.openingHour),
+      closingHour: Number(row.closingHour),
       tableCount: Number(row.tableCount),
       occupiedTableCount: Number(row.occupiedTableCount),
     }));
@@ -87,7 +96,12 @@ export class OutletsService {
       city: this.requiredText(dto.city, 'city'),
       address: this.requiredText(dto.address, 'address'),
       isActive: dto.active ?? true,
+      openingHour: dto.openingHour ?? 12,
+      closingHour: dto.closingHour ?? 22,
     });
+    if (outlet.closingHour <= outlet.openingHour) {
+      throw new BadRequestException('Jam tutup harus setelah jam buka.');
+    }
     return this.saveWithConflict(outlet);
   }
 
@@ -110,6 +124,11 @@ export class OutletsService {
       );
     }
     if (dto.active !== undefined) outlet.isActive = dto.active;
+    if (dto.openingHour !== undefined) outlet.openingHour = dto.openingHour;
+    if (dto.closingHour !== undefined) outlet.closingHour = dto.closingHour;
+    if (outlet.closingHour <= outlet.openingHour) {
+      throw new BadRequestException('Jam tutup harus setelah jam buka.');
+    }
     return this.saveWithConflict(outlet);
   }
 

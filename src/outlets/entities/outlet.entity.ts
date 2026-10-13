@@ -24,6 +24,12 @@ export class OutletEntity {
   @Column({ type: 'varchar', length: 64, default: 'Asia/Jakarta' })
   timezone!: string;
 
+  @Column({ name: 'opening_hour', type: 'smallint', default: 12 })
+  openingHour!: number;
+
+  @Column({ name: 'closing_hour', type: 'smallint', default: 22 })
+  closingHour!: number;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
 

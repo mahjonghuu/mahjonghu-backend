@@ -28,6 +28,8 @@ describe('OutletsService', () => {
         city: 'Jakarta Pusat',
         address: 'Jalan Menteng',
         active: true,
+        openingHour: '9',
+        closingHour: '23',
         tableCount: '7',
         occupiedTableCount: '2',
       },
@@ -40,6 +42,8 @@ describe('OutletsService', () => {
         city: 'Jakarta Pusat',
         address: 'Jalan Menteng',
         active: true,
+        openingHour: 9,
+        closingHour: 23,
         tableCount: 7,
         occupiedTableCount: 2,
       },
@@ -63,6 +67,8 @@ describe('OutletsService', () => {
       name: 'MahjongHu Menteng',
       city: 'Jakarta Pusat',
       address: 'Jalan Menteng',
+      openingHour: 12,
+      closingHour: 22,
       isActive: true,
     });
   });
