@@ -5,8 +5,9 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { OutletsModule } from './outlets/outlets.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
-import { TablesModule } from './tables/tables.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { TablesModule } from './tables/tables.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AuthModule } from './auth/auth.module.js';
     }),
     AuthModule,
     BookingsModule,
+    PaymentsModule,
     TablesModule,
     OutletsModule,
   ],

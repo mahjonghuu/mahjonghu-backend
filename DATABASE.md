@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-This PostgreSQL schema is encoded in the TypeORM migrations [`src/database/migrations/1791590400000-InitialSchema.ts`](src/database/migrations/1791590400000-InitialSchema.ts) and `1791676800000-AddPasswordHashToUsers.ts`. The backend uses NestJS/TypeORM with `synchronize: false`; apply migrations explicitly before connecting the frontend. The `users` entity supports backend-provisioned owner login with bcrypt password hashes, while the frontend PoC in `../mahjonghu-web/app/dashboard/model.ts` still uses in-memory demo data for outlets, tables, and _already paid_ transactions. Public guests can book without an account. Do not treat editable PoC table status as evidence of a real booking or payment.
+This PostgreSQL schema is encoded in the TypeORM migrations [`src/database/migrations/1791590400000-InitialSchema.ts`](src/database/migrations/1791590400000-InitialSchema.ts), `1791676800000-AddPasswordHashToUsers.ts`, and `1791763200000-AddDokuPaymentSessions.ts`. The backend uses NestJS/TypeORM with `synchronize: false`; apply migrations explicitly before connecting the frontend. Public guests can book without an account; checkout holds and DOKU payment status are persisted server-side. Do not treat editable dashboard demo records as evidence of a real booking or payment.
 
 ## Relationships
 
@@ -12,7 +12,10 @@ erDiagram
   users |o--o{ bookings : places
   outlets ||--o{ bookings : receives
   mahjong_tables ||--o{ bookings : reserved_for
-  bookings ||--o{ payments : settled_by
+  payment_sessions ||--o{ payment_session_bookings : groups
+  bookings ||--o{ payment_session_bookings : included_in
+  payment_sessions ||--o{ payments : settled_by
+  bookings ||--o{ payments : contributes
   payments ||--o{ payments : refunded_by
 ```
 
@@ -21,8 +24,10 @@ erDiagram
 | `users`          | `id` UUID PK; `auth_subject` unique trusted identifier; `email` unique case-insensitively; nullable `password_hash` bcrypt digest for provisioned dashboard owners; `role` (`customer`, `owner`); `is_active`, audit timestamps. Dashboard credentials are provisioned only by trusted administrators; never store session tokens in this table.                                                                                                                                                                      |
 | `outlets`        | `id` UUID PK; `name` and `city` varchar(80); `address` varchar(240); `timezone` IANA name (default `Asia/Jakarta`); `is_active` boolean; `archived_at`, `created_at`, `updated_at` timestamptz. Active names are unique case-insensitively.                                                                                                                                                                                                                                                                           |
 | `mahjong_tables` | `id` UUID PK; `outlet_id` FK; `name` varchar(80), `hourly_rate_idr` positive bigint, `condition` (`available`, `maintenance`), `archived_at`, audit timestamps. Active table names are unique within an outlet. There is no manually editable `in_use` flag: it is derived from an `in_progress` booking.                                                                                                                                                                                                             |
-| `bookings`       | `id` UUID PK; nullable `user_id` FK for an authenticated customer (guest bookings have no user); `outlet_id` and `table_id` (joint FK to the table's outlet); public `reference` unique; `customer_name` varchar(120), `customer_contact` varchar(160); `starts_at`, `ends_at` UTC instants; `duration_hours` positive integer; `hourly_rate_idr` and `total_amount_idr` price snapshots; `status` (`pending`, `confirmed`, `in_progress`, `completed`, `cancelled`, `expired`); `hold_expires_at`, audit timestamps. |
-| `payments`       | `id` UUID PK; `booking_id` FK; `kind` (`charge`, `refund`), `status` (`pending`, `succeeded`, `failed`); `amount_idr` positive bigint; `provider`, `provider_reference`, `idempotency_key`; `original_payment_id` for refunds; `settled_at`, audit timestamps. One row per charge/refund attempt, not a mutable booking total.                                                                                                                                                                                        |
+| `bookings`       | `id` UUID PK; nullable `user_id` FK for an authenticated customer (guest bookings have no user); `outlet_id` and `table_id` (joint FK to the table's outlet); public `reference` unique; `customer_name`, `customer_contact`; `starts_at`, `ends_at` UTC instants; `duration_hours`; `hourly_rate_idr` and `total_amount_idr` price snapshots; `status` (`pending`, `confirmed`, `in_progress`, `completed`, `cancelled`, `expired`); `hold_expires_at`, audit timestamps. |
+| `payment_sessions` | Merchant invoice number, DOKU environment, aggregate amount/status, checkout URL, 15-minute provider expiry, notification request ID, and guest name/phone/email. One order can contain multiple booking rows. |
+| `payment_session_bookings` | Composite-key links from one checkout session to its held bookings; each booking belongs to at most one payment session. |
+| `payments`       | `id` UUID PK; `booking_id` FK; nullable `payment_session_id` FK; `kind` (`charge`, `refund`), `status` (`pending`, `succeeded`, `failed`); `amount_idr`; `provider`, `provider_reference`, `idempotency_key`; `original_payment_id` for refunds; `settled_at`, audit timestamps. One row per booking contribution to the aggregate charge or refund. |
 
 All money is **whole Indonesian rupiah (IDR)** stored as `bigint`; never floating point. Identifiers remain stable across renames. All timestamps are `timestamptz`, stored as instants; use an outlet's `timezone` only for displaying and grouping local calendar dates. No precomputed dashboard totals or independent transaction table is required: successful payment rows are the financial source of truth.
 
@@ -145,11 +150,43 @@ CREATE INDEX payments_settled_idx ON payments (settled_at, booking_id)
 
 ```
 
+The DOKU migration creates an aggregate order and links each booking contribution to the existing `payments` table:
+
+```sql
+CREATE TABLE payment_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_number varchar(30) NOT NULL UNIQUE,
+  environment varchar(10) NOT NULL CHECK (environment IN ('dev', 'prod')),
+  status varchar(20) NOT NULL CHECK (status IN ('pending', 'succeeded', 'failed', 'expired')),
+  customer_name varchar(120) NOT NULL,
+  customer_phone varchar(32) NOT NULL,
+  customer_email varchar(254) NOT NULL,
+  amount_idr bigint NOT NULL CHECK (amount_idr > 0),
+  checkout_url text,
+  doku_session_id varchar(160),
+  expires_at timestamptz NOT NULL,
+  notification_request_id varchar(128) UNIQUE,
+  settled_at timestamptz,
+  reservation_needs_review boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE payment_session_bookings (
+  payment_session_id uuid NOT NULL REFERENCES payment_sessions(id) ON DELETE RESTRICT,
+  booking_id uuid NOT NULL UNIQUE REFERENCES bookings(id) ON DELETE RESTRICT,
+  PRIMARY KEY (payment_session_id, booking_id)
+);
+ALTER TABLE payments ADD COLUMN payment_session_id uuid
+  REFERENCES payment_sessions(id) ON DELETE RESTRICT;
+```
+
+Checkout creation inserts all pending bookings and payment contributions transactionally before requesting the DOKU Checkout URL. Signed, amount-matched callbacks settle linked charges. A success received after the payment deadline can restore expired holds only when DOKU's transaction timestamp is within the deadline and no conflicting reservation exists. Late payments or rebooked/conflicting slots are recorded as paid and flagged with `reservation_needs_review`; the system never silently creates an overlapping booking. DOKU Checkout failure notifications are acknowledged without closing the session so customers can retry another method; unresolved orders expire after 15 minutes.
+
 ## Lifecycle and integrity rules
 
 1. **Outlets and tables:** do not physically delete records referenced by bookings/payments. Archive them using `archived_at`; inactive outlets are hidden from new public bookings, but remain visible in historical reports. The application must reject deactivating/archiving an outlet with an `in_progress` booking and reject maintenance/archival of an occupied table. Do not change a table's `outlet_id` once bookings exist (prefer never moving tables; create a new table at the destination). Validate `timezone` against IANA time zones and normalize names by trimming before writing.
 2. **Availability:** public booking may select only active, unarchived outlets and unarchived tables in `available` condition. Check these rules and insert the `pending` booking in one database transaction. The exclusion constraint is the final defense against concurrent overlapping reservations; handle its conflict as a booking-unavailable response. `pending` is a temporary hold with `hold_expires_at`; expire overdue holds in a worker/transaction **before** accepting a new reservation for that slot. The exclusion constraint does not automatically ignore an elapsed hold. A real `in_use` dashboard status comes from an `in_progress` booking; a table in `maintenance` must not have one. Restrict legal status transitions in the service (e.g. `pending` → `confirmed` after payment, `confirmed` → `in_progress` → `completed`; cancellation/expiration releases slots).
-3. **Prices and payments:** snapshot the rate and agreed hours on booking creation; editing the current table rate must not rewrite historical revenue. Verify signed payment provider callbacks; process them idempotently using `provider_reference` / `idempotency_key` in a transaction and lock the booking and relevant payment rows. Only record `succeeded` after settlement. Reject or refund a successful callback for an expired/cancelled booking as appropriate; never silently re-confirm a slot that was released. Refunds must refer to a succeeded charge for the **same booking**; verify in the service that cumulative succeeded refunds cannot exceed that charge. The parent FK guarantees the same booking but cannot guarantee `kind` or the cumulative sum. Never generate a paid row by simply changing table status.
+3. **Prices and payments:** snapshot the rate and agreed hours on booking creation; editing the current table rate must not rewrite historical revenue. Verify signed provider callbacks; process them idempotently in a transaction and lock the payment session and linked bookings. Only record `succeeded` after settlement. Restore an expired hold only for a signed payment timestamp within its deadline and when the slot remains conflict-free; otherwise record payment as succeeded and flag manual reservation review. DOKU checkout failure notifications are ignored to allow another payment-method attempt; expire unpaid checkout sessions and linked holds after 15 minutes. Refunds must refer to a succeeded charge for the same booking, and cumulative refunds must not exceed that charge.
 4. **Authorization and privacy:** public guests can create bookings with separate public-specific validation and rate/abuse controls. Authenticated `customer` users can access only their own bookings (`bookings.user_id`); never allow a client to choose or change this ID independently of its authenticated identity. The business dashboard, outlet/table management, internal booking management and financial reports require an active `owner` role verified on the server. There is no per-outlet access table: owners can manage all outlets. Only trusted server-side provisioning can grant or change the `owner` role; public sign-up always creates `customer` users. Never trust browser-supplied roles or outlet filters for authorization. Restrict access to `customer_contact`, do not include it in CSV exports, and define retention/deletion handling before handling real customer data. The in-memory demo's `Admin Demo` avatar does not represent a real user account.
 5. **Updates:** set `updated_at` on every write in application logic or a database trigger (the column default only handles inserts). Apply status changes and relevant validations in transactions to avoid races with booking and payment callbacks. Never use `synchronize: true` against an existing database; use reviewed forward migrations, with a rollback/recovery plan for destructive changes.
 
@@ -159,4 +196,4 @@ Revenue is **net settled cash flow**: each succeeded `charge` contributes `+amou
 
 Use the same outlet and inclusive local-date filters for the summary, per-outlet totals, transaction list, and CSV. For a single outlet, convert local `[from_date 00:00, (to_date + 1) 00:00)` using its IANA timezone to UTC before filtering `payments.settled_at`; for an all-outlet report, apply **each** outlet's timezone when selecting local dates. Do not filter via UTC date alone, especially across midnight or mixed timezones. Include archived outlets in historical revenue, but count only active, unarchived outlets in the current outlet metric. Distinct successful charges/refunds are rows in the financial breakdown; a separate count of paid bookings should count distinct booking IDs with at least one succeeded charge rather than payment attempts. Current table status, availability, and the number of occupied tables come from `mahjong_tables` plus `bookings.status = 'in_progress'`, not from payments. Server responses should compute these metrics, not persist redundant counters.
 
-The initial migration creates the operational tables; the follow-up migration adds nullable password hashes for existing user records. Owner credentials are provisioned by trusted administrators, never through public signup. Dashboard APIs enforce owner JWT authorization. Replace the PoC's in-memory operational records only as their backend implementations are completed.
+The initial migration creates the operational tables, the follow-up adds nullable password hashes, and `AddDokuPaymentSessions1791763200000` adds DOKU order records and booking links. Owner credentials are provisioned by trusted administrators, never through public signup. Dashboard APIs enforce owner JWT authorization. Replace the PoC's in-memory operational records only as their backend implementations are completed.

@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { fileURLToPath } from 'node:url';
+import { AddDokuPaymentSessions1791763200000 } from './migrations/1791763200000-AddDokuPaymentSessions.js';
 import { InitialSchema1791590400000 } from './migrations/1791590400000-InitialSchema.js';
 import { AddPasswordHashToUsers1791676800000 } from './migrations/1791676800000-AddPasswordHashToUsers.js';
 
@@ -20,5 +21,6 @@ export default new DataSource({
   migrations: [
     InitialSchema1791590400000,
     AddPasswordHashToUsers1791676800000,
+    AddDokuPaymentSessions1791763200000,
   ],
 });

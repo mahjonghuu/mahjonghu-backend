@@ -9,7 +9,7 @@ npm install
 cp .env.example .env
 ```
 
-Configure `DATABASE_URL`, `WEB_ORIGIN`, and `JWT_SECRET` in `.env`. Generate a unique random `JWT_SECRET` of at least 32 characters and keep it private. Never commit `.env` or share its secret. The API listens on `127.0.0.1` by default and uses port `3001`.
+Configure `DATABASE_URL`, `WEB_ORIGIN`, `JWT_SECRET`, the DOKU credentials, and public callback URLs in `.env`. Generate a unique random `JWT_SECRET` of at least 32 characters and keep it private. Never commit `.env` or share its secret. The API listens on `127.0.0.1` by default and uses port `3001`.
 
 Apply migrations explicitly after confirming the target database:
 
@@ -18,7 +18,16 @@ npm run migration:show
 npm run migration:run
 ```
 
-The migrations create the initial booking schema and add nullable `users.password_hash`; existing accounts remain unable to log in until provisioned. There is no public registration or owner-promotion endpoint. Create an owner through a trusted server/database administrator only. Generate a bcrypt hash with the backend dependency, then insert/update an owner record using a UUID `auth_subject` and normalized email:
+The DOKU payment migration creates payment sessions and links one aggregate checkout to its held bookings. Configure separate credentials:
+
+- Sandbox: `DOKU_DEV_CLIENT_ID`, `DOKU_DEV_SECRET_KEY`
+- Production: `DOKU_PROD_CLIENT_ID`, `DOKU_PROD_SECRET_KEY`
+- Public browser return origin: `WEB_PUBLIC_URL`
+- Public backend origin for DOKU HTTP notifications: `BACKEND_PUBLIC_URL`
+
+The payment notification URLs are `/payments/doku/dev/notification` and `/payments/doku/prod/notification`. Configure each URL in the corresponding DOKU merchant environment, or set `BACKEND_PUBLIC_URL` so each checkout overrides the merchant notification URL. The frontend selects sandbox by default; set `NEXT_PUBLIC_DOKU_ENV=prod` at build time to use production credentials.
+
+The migrations create the initial booking schema, add nullable `users.password_hash`, and add DOKU payment sessions; existing accounts remain unable to log in until provisioned. There is no public registration or owner-promotion endpoint. Create an owner through a trusted server/database administrator only. Generate a bcrypt hash with the backend dependency, then insert/update an owner record using a UUID `auth_subject` and normalized email:
 
 ```bash
 read -s -p 'Owner password: ' OWNER_PASSWORD
@@ -51,7 +60,9 @@ Browser requests use credentialed CORS from the configured `WEB_ORIGIN`. The web
 
 - `GET /outlets` lists non-archived outlets. `POST /outlets`, `PATCH /outlets/:id`, and `DELETE /outlets/:id` manage outlets; archival is rejected if tables or booking history reference them.
 - `GET /tables` lists non-archived tables with booking-derived occupancy. `POST /tables`, `PATCH /tables/:id`, and `DELETE /tables/:id` manage tables; occupancy cannot be set manually.
-- `GET /bookings/availability` and `POST /bookings` support public booking. Booking creation checks current availability and writes a temporary hold transactionally.
+- `GET /bookings/availability` provides public slot discovery. All guest reservations are created together with a DOKU payment session through the checkout endpoints above; standalone unpaid `POST /bookings` is not exposed.
+- `POST /payments/doku/dev/checkout` creates one sandbox DOKU Checkout for all selected table sessions; `/prod/checkout` uses the separate production credentials. Each server-created booking hold and the DOKU checkout deadline use the provider's 15-minute expiry.
+- `POST /payments/doku/:environment/notification` verifies signed DOKU payment notifications. `GET /payments/doku/status/:reference` exposes the current public payment/result details; the result page polls this endpoint until the payment is settled or expires.
 
 CORS uses `WEB_ORIGIN` (default `http://localhost:3000`). Request logging records request IDs, method, path, status, and duration; request bodies and headers are not logged.
 
@@ -59,4 +70,11 @@ CORS uses `WEB_ORIGIN` (default `http://localhost:3000`). Request logging record
 npm run dev
 npm test
 npm run build
+```
+
+To exercise the payment checkout locks and expiry/notification concurrency against PostgreSQL, use a dedicated test database. The test creates and removes its own schema and runs the payment migrations; the database user needs permission to create schemas and the `btree_gist` extension.
+
+```bash
+PAYMENTS_TEST_DATABASE_URL=postgres://user:password@localhost:5432/mahjonghu_test \
+  npx vitest run src/payments/payments.service.pg.spec.ts
 ```
