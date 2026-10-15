@@ -8,6 +8,7 @@ import { BookingsModule } from './bookings/bookings.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { TablesModule } from './tables/tables.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
+import { DashboardModule } from './dashboard/dashboard.module.js';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PaymentsModule } from './payments/payments.module.js';
     BookingsModule,
     PaymentsModule,
     TablesModule,
+    DashboardModule,
     OutletsModule,
   ],
   controllers: [AppController],
