@@ -83,4 +83,38 @@ describe('DashboardService', () => {
     expect(query.mock.calls[1][0]).toContain("b.status = 'in_progress'");
     expect(query.mock.calls[3][1]).toEqual(['2026-10-01', '2026-10-15']);
   });
+
+  it('returns every filtered paid booking and the backend-rounded average for revenue reports', async () => {
+    const transactions = [
+      {
+        id: 'booking-1',
+        outletId: 'outlet-1',
+        tableId: 'table-1',
+        customer: 'Guest',
+        outletName: 'MahjongHu Jakarta',
+        tableName: 'Table 1',
+        settledAt: '2026-10-15T09:00:00.000Z',
+        hours: 2,
+        amountIdr: '400000',
+      },
+    ];
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 'outlet-1', name: 'MahjongHu Jakarta', active: true }])
+      .mockResolvedValueOnce([{ status: 'Tersedia', count: 1, available_count: 1 }])
+      .mockResolvedValueOnce([{ id: 'outlet-1', name: 'MahjongHu Jakarta', amountIdr: '400000' }])
+      .mockResolvedValueOnce([{ revenueIdr: '400000', paidTransactionCount: 3, playedHours: 7 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(transactions);
+    const service = new DashboardService({ query } as unknown as DataSource);
+
+    const result = await service.revenueReport('2026-10-01', '2026-10-15', 'outlet-1');
+
+    expect(result.metrics.averageTransactionIdr).toBe(133333);
+    expect(result.transactions).toEqual(transactions);
+    expect(query).toHaveBeenCalledTimes(6);
+    expect(query.mock.calls[5][0]).toContain('GROUP BY b.id');
+    expect(query.mock.calls[5][0]).not.toContain('LIMIT');
+    expect(query.mock.calls[5][1]).toEqual(['2026-10-01', '2026-10-15', 'outlet-1']);
+  });
 });

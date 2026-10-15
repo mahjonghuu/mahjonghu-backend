@@ -24,4 +24,14 @@ export class DashboardController {
     }
     return this.dashboard.summary(query.from, query.to, query.outletId);
   }
+
+  @Get('revenue')
+  revenue(@Query() query: DashboardSummaryQueryDto) {
+    if (query.from && query.to && query.from > query.to) {
+      throw new BadRequestException(
+        'Tanggal mulai tidak boleh melewati tanggal akhir.',
+      );
+    }
+    return this.dashboard.revenueReport(query.from, query.to, query.outletId);
+  }
 }
