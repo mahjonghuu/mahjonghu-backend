@@ -6,10 +6,14 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { UserEntity } from './entities/user.entity.js';
+import { CustomerAuthController } from './customer-auth.controller.js';
+import { CustomerAuthService } from './customer-auth.service.js';
+import { CustomerOtpEntity } from './entities/customer-otp.entity.js';
+import { CustomerOtpIpLimitEntity } from './entities/customer-otp-ip-limit.entity.js';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([UserEntity]),
+    TypeOrmModule.forFeature([UserEntity, CustomerOtpEntity, CustomerOtpIpLimitEntity]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
@@ -25,8 +29,8 @@ import { UserEntity } from './entities/user.entity.js';
       },
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, JWTAuthGuard],
-  exports: [JwtModule],
+  controllers: [AuthController, CustomerAuthController],
+  providers: [AuthService, CustomerAuthService, JWTAuthGuard],
+  exports: [JwtModule, CustomerAuthService],
 })
 export class AuthModule {}

@@ -15,6 +15,7 @@ type OutletSummary = {
   name: string;
   city: string;
   address: string;
+  visibility: 'public' | 'private';
   active: boolean;
   openingHour: number;
   closingHour: number;
@@ -39,6 +40,7 @@ export class OutletsService {
         o.city,
         o.address,
         o.is_active AS active,
+        o.visibility,
         o.opening_hour AS "openingHour",
         o.closing_hour AS "closingHour",
         (SELECT count(*) FROM mahjong_tables t
@@ -54,6 +56,7 @@ export class OutletsService {
       name: String(row.name),
       city: String(row.city),
       address: String(row.address),
+      visibility: row.visibility as 'public' | 'private',
       active: row.active === true,
       openingHour: Number(row.openingHour),
       closingHour: Number(row.closingHour),
@@ -63,10 +66,12 @@ export class OutletsService {
   }
 
   /** Lists active, non-archived outlets for public discovery. */
-  async findPublic(): Promise<OutletSummary[]> {
-    const rows = await this.outlets.query(`
+  async findPublic(userId: string | null = null): Promise<OutletSummary[]> {
+    const rows = await this.outlets.query(
+      `
       SELECT
         o.id, o.name, o.city, o.address, o.is_active AS active,
+        o.visibility,
         o.opening_hour AS "openingHour", o.closing_hour AS "closingHour",
         (SELECT count(*) FROM mahjong_tables t
           WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
@@ -74,14 +79,23 @@ export class OutletsService {
           WHERE b.outlet_id = o.id AND b.status = 'in_progress') AS "occupiedTableCount"
       FROM outlets o
       WHERE o.archived_at IS NULL AND o.is_active = true
+        AND (o.visibility = 'public' OR ($1::uuid IS NOT NULL AND EXISTS (
+          SELECT 1 FROM outlet_access a JOIN users u ON u.id = a.user_id
+          WHERE a.outlet_id = o.id AND a.user_id = $1::uuid
+            AND u.role = 'customer' AND u.is_active = true
+            AND (a.expires_at IS NULL OR a.expires_at > CURRENT_TIMESTAMP)
+        )))
       ORDER BY o.created_at ASC, o.id ASC
-    `);
+    `,
+      [userId],
+    );
     return rows.map((row: Record<string, unknown>) => ({
       id: String(row.id),
       name: String(row.name),
       city: String(row.city),
       address: String(row.address),
       active: row.active === true,
+      visibility: row.visibility as 'public' | 'private',
       openingHour: Number(row.openingHour),
       closingHour: Number(row.closingHour),
       tableCount: Number(row.tableCount),
@@ -95,6 +109,7 @@ export class OutletsService {
       name: this.requiredText(dto.name, 'name'),
       city: this.requiredText(dto.city, 'city'),
       address: this.requiredText(dto.address, 'address'),
+      visibility: dto.visibility ?? 'public',
       isActive: dto.active ?? true,
       openingHour: dto.openingHour ?? 12,
       closingHour: dto.closingHour ?? 22,
@@ -124,6 +139,7 @@ export class OutletsService {
       );
     }
     if (dto.active !== undefined) outlet.isActive = dto.active;
+    if (dto.visibility !== undefined) outlet.visibility = dto.visibility;
     if (dto.openingHour !== undefined) outlet.openingHour = dto.openingHour;
     if (dto.closingHour !== undefined) outlet.closingHour = dto.closingHour;
     if (outlet.closingHour <= outlet.openingHour) {

@@ -1,7 +1,12 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
+import { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
 import { BookingAvailabilityDto } from './dto/booking-availability.dto.js';
 import { BookingEntity } from './entities/booking.entity.js';
@@ -16,12 +21,19 @@ export class BookingsService {
     private readonly tables: Repository<TableEntity>,
     @InjectRepository(OutletEntity)
     private readonly outlets: Repository<OutletEntity>,
+    private readonly outletAccess: OutletAccessService,
   ) {}
 
   /** Lists bookable tables whose active reservation intervals do not overlap. */
-  async findAvailable(dto: BookingAvailabilityDto) {
+  async findAvailable(
+    dto: BookingAvailabilityDto,
+    userId: string | null = null,
+  ) {
     const startsAt = new Date(dto.startsAt);
     this.validateInterval(startsAt, dto.durationHours);
+    if (!(await this.outletAccess.allowed(dto.outletId, userId))) {
+      throw new NotFoundException('Outlet tidak ditemukan.');
+    }
     const endsAt = new Date(startsAt.getTime() + dto.durationHours * 3_600_000);
 
     const conflicts = this.bookings

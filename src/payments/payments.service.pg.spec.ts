@@ -6,6 +6,7 @@ import { BookingEntity } from '../bookings/entities/booking.entity.js';
 import { InitialSchema1791590400000 } from '../database/migrations/1791590400000-InitialSchema.js';
 import { AddDokuPaymentSessions1791763200000 } from '../database/migrations/1791763200000-AddDokuPaymentSessions.js';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
+import type { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
 import type { DokuClientService } from './doku-client.service.js';
 import { PaymentEntity } from './entities/payment.entity.js';
@@ -29,8 +30,17 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
       url: databaseUrl,
       schema,
       extra: { options: `-c search_path=${schema},public` },
-      entities: [BookingEntity, OutletEntity, TableEntity, PaymentEntity, PaymentSessionEntity],
-      migrations: [InitialSchema1791590400000, AddDokuPaymentSessions1791763200000],
+      entities: [
+        BookingEntity,
+        OutletEntity,
+        TableEntity,
+        PaymentEntity,
+        PaymentSessionEntity,
+      ],
+      migrations: [
+        InitialSchema1791590400000,
+        AddDokuPaymentSessions1791763200000,
+      ],
     });
     await dataSource.initialize();
     await dataSource.runMigrations();
@@ -50,7 +60,8 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
     )) as { id: string }[];
     const expiresAt = new Date(Date.now() - 60_000);
     const settledAt = new Date(expiresAt.getTime() - 60_000);
-    const ids: { sessionId: string; bookingId: string; paymentId: string }[] = [];
+    const ids: { sessionId: string; bookingId: string; paymentId: string }[] =
+      [];
 
     for (let index = 0; index < 2; index += 1) {
       const table = (await dataSource.query(
@@ -73,7 +84,13 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
          VALUES ($1, $2, $3, 'Guest', '081234567890', '2030-01-01T05:00:00Z',
                  '2030-01-01T06:00:00Z', 1, 75000, 75000, 'pending', $4, $5)
          RETURNING id`,
-        [`MHBOOKING${index}`, outlet[0].id, table[0].id, expiresAt, new Date(expiresAt.getTime() - 60_000)],
+        [
+          `MHBOOKING${index}`,
+          outlet[0].id,
+          table[0].id,
+          expiresAt,
+          new Date(expiresAt.getTime() - 60_000),
+        ],
       )) as { id: string }[];
       await dataSource.query(
         `INSERT INTO payment_session_bookings (payment_session_id, booking_id) VALUES ($1, $2)`,
@@ -84,22 +101,38 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
          VALUES ($1, $2, 'charge', 'pending', 75000, 'DOKU_DEV', $3) RETURNING id`,
         [booking[0].id, session[0].id, `integration-${index}`],
       )) as { id: string }[];
-      ids.push({ sessionId: session[0].id, bookingId: booking[0].id, paymentId: payment[0].id });
+      ids.push({
+        sessionId: session[0].id,
+        bookingId: booking[0].id,
+        paymentId: payment[0].id,
+      });
     }
 
     const service = new PaymentsService(
-      dataSource.getRepository(PaymentSessionEntity), dataSource,
-      {} as DokuClientService, {} as ConfigService,
+      dataSource.getRepository(PaymentSessionEntity),
+      dataSource,
+      {} as DokuClientService,
+      {
+        allowed: vi.fn().mockResolvedValue(true),
+      } as unknown as OutletAccessService,
+      {} as ConfigService,
     );
     const lock = dataSource.createQueryRunner();
     await lock.connect();
     await lock.startTransaction();
     try {
-      await lock.query('SELECT id FROM payment_sessions WHERE id = $1 FOR UPDATE', [ids[0].sessionId]);
-      const notification = service.handleNotification('dev', {
-        order: { invoice_number: 'MHINTEGRATION0', amount: 75000 },
-        transaction: { status: 'SUCCESS', date: settledAt.toISOString() },
-      }, 'integration-notification');
+      await lock.query(
+        'SELECT id FROM payment_sessions WHERE id = $1 FOR UPDATE',
+        [ids[0].sessionId],
+      );
+      const notification = service.handleNotification(
+        'dev',
+        {
+          order: { invoice_number: 'MHINTEGRATION0', amount: 75000 },
+          transaction: { status: 'SUCCESS', date: settledAt.toISOString() },
+        },
+        'integration-notification',
+      );
       await service['expireOverdueSessions']();
       const states = (await dataSource.query(
         `SELECT status FROM payment_sessions WHERE id = ANY($1::uuid[]) ORDER BY invoice_number`,
@@ -121,10 +154,22 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
        JOIN bookings b ON b.id = psb.booking_id
        JOIN payments p ON p.booking_id = b.id
        ORDER BY s.invoice_number`,
-    )) as { session_status: string; booking_status: string; payment_status: string }[];
+    )) as {
+      session_status: string;
+      booking_status: string;
+      payment_status: string;
+    }[];
     expect(rows).toEqual([
-      { session_status: 'succeeded', booking_status: 'confirmed', payment_status: 'succeeded' },
-      { session_status: 'expired', booking_status: 'expired', payment_status: 'failed' },
+      {
+        session_status: 'succeeded',
+        booking_status: 'confirmed',
+        payment_status: 'succeeded',
+      },
+      {
+        session_status: 'expired',
+        booking_status: 'expired',
+        payment_status: 'failed',
+      },
     ]);
   });
 
@@ -152,10 +197,17 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
           expiresAt: new Date(Date.now() + 15 * 60_000),
         }),
       };
-      const config = { get: vi.fn((_key: string, fallback?: string) => fallback) };
+      const config = {
+        get: vi.fn((_key: string, fallback?: string) => fallback),
+      };
       const service = new PaymentsService(
-        dataSource.getRepository(PaymentSessionEntity), dataSource,
-        doku as unknown as DokuClientService, config as unknown as ConfigService,
+        dataSource.getRepository(PaymentSessionEntity),
+        dataSource,
+        doku as unknown as DokuClientService,
+        {
+          allowed: vi.fn().mockResolvedValue(true),
+        } as unknown as OutletAccessService,
+        config as unknown as ConfigService,
       );
       const startsAt = new Date(Date.now() + 2 * 86_400_000);
       startsAt.setUTCHours(5, 0, 0, 0);
@@ -164,7 +216,13 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
         customerName: 'Guest',
         customerPhone: '081234567890',
         customerEmail: 'guest@example.com',
-        sessions: [{ tableId: table[0].id, startsAt: startsAt.toISOString(), durationHours: 1 }],
+        sessions: [
+          {
+            tableId: table[0].id,
+            startsAt: startsAt.toISOString(),
+            durationHours: 1,
+          },
+        ],
       });
       let waiting = false;
       for (let attempt = 0; attempt < 100 && !waiting; attempt += 1) {
@@ -184,7 +242,8 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
       expect(waiting).toBe(true);
       expect(result.checkoutUrl).toBe('https://checkout.example.com/order');
       expect(doku.createCheckout).toHaveBeenCalledWith(
-        'dev', expect.objectContaining({ amount: 90_000 }),
+        'dev',
+        expect.objectContaining({ amount: 90_000 }),
       );
     } finally {
       if (updater.isTransactionActive) await updater.rollbackTransaction();

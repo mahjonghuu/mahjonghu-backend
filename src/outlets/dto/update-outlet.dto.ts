@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -32,6 +33,10 @@ export class UpdateOutletDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @IsOptional()
+  @IsIn(['public', 'private'])
+  visibility?: 'public' | 'private';
 
   @IsOptional()
   @IsInt()

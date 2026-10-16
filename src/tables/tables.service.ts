@@ -48,8 +48,9 @@ export class TablesService {
   }
 
   /** Lists tables for public discovery, excluding inactive outlets. */
-  async findPublic(): Promise<TableRecord[]> {
-    const rows = await this.tables.query(`
+  async findPublic(userId: string | null = null): Promise<TableRecord[]> {
+    const rows = await this.tables.query(
+      `
       SELECT t.id, t.outlet_id AS "outletId", t.name,
         t.hourly_rate_idr AS rate, t.condition,
         EXISTS (
@@ -60,8 +61,17 @@ export class TablesService {
       FROM mahjong_tables t
       JOIN outlets o ON o.id = t.outlet_id
       WHERE t.archived_at IS NULL AND o.archived_at IS NULL AND o.is_active = true
+        AND (o.visibility = 'public' OR EXISTS (
+          SELECT 1 FROM outlet_access a
+          JOIN users u ON u.id = a.user_id
+          WHERE a.outlet_id = o.id AND a.user_id = $1::uuid
+            AND u.is_active = true
+            AND (a.expires_at IS NULL OR a.expires_at > CURRENT_TIMESTAMP)
+        ))
       ORDER BY t.created_at ASC, t.id ASC
-    `);
+    `,
+      [userId],
+    );
     return rows.map((row: Record<string, unknown>) => this.toRecord(row));
   }
 

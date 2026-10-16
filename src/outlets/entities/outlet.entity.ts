@@ -30,6 +30,9 @@ export class OutletEntity {
   @Column({ name: 'closing_hour', type: 'smallint', default: 22 })
   closingHour!: number;
 
+  @Column({ type: 'varchar', length: 7, default: 'public' })
+  visibility!: 'public' | 'private';
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
 

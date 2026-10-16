@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
+import { CustomerAuthService } from '../auth/customer-auth.service.js';
 import { CreateDokuCheckoutDto } from './dto/create-doku-checkout.dto.js';
 import {
   DokuClientService,
@@ -28,14 +29,20 @@ export class PaymentsController {
   constructor(
     private readonly payments: PaymentsService,
     private readonly doku: DokuClientService,
+    private readonly customerAuth: CustomerAuthService,
   ) {}
 
   @Post(':environment/checkout')
-  createCheckout(
+  async createCheckout(
     @Param('environment') environment: string,
     @Body() dto: CreateDokuCheckoutDto,
+    @Req() request: Request,
   ) {
-    return this.payments.createCheckout(this.environment(environment), dto);
+    return this.payments.createCheckout(
+      this.environment(environment),
+      dto,
+      await this.customerAuth.currentUser(request),
+    );
   }
 
   @Post(':environment/notification')

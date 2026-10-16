@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { OutletsModule } from '../outlets/outlets.module.js';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
 import { BookingsController } from './bookings.controller.js';
@@ -11,6 +12,7 @@ import { BookingEntity } from './entities/booking.entity.js';
 @Module({
   imports: [
     AuthModule,
+    OutletsModule,
     TypeOrmModule.forFeature([BookingEntity, TableEntity, OutletEntity]),
   ],
   controllers: [BookingsController],

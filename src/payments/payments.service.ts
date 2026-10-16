@@ -12,6 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
+import { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
 import { CreateDokuCheckoutDto } from './dto/create-doku-checkout.dto.js';
 import {
@@ -38,6 +39,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     private readonly sessions: Repository<PaymentSessionEntity>,
     private readonly dataSource: DataSource,
     private readonly doku: DokuClientService,
+    private readonly outletAccess: OutletAccessService,
     private readonly config: ConfigService,
   ) {}
 
@@ -60,6 +62,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   async createCheckout(
     environment: DokuEnvironment,
     dto: CreateDokuCheckoutDto,
+    userId: string | null = null,
   ) {
     const customerName = dto.customerName.trim();
     const customerPhone = dto.customerPhone.trim();
@@ -83,6 +86,9 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
           where: { id: dto.outletId, isActive: true, archivedAt: IsNull() },
         });
         if (!outlet) throw new NotFoundException('Outlet tidak ditemukan.');
+        if (!(await this.outletAccess.allowed(outlet.id, userId))) {
+          throw new NotFoundException('Outlet tidak ditemukan.');
+        }
         this.validateRequestedSessions(
           dto,
           outlet.timezone,
@@ -197,7 +203,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
             reference: `MH${randomUUID().replaceAll('-', '').toUpperCase()}`,
             outletId: dto.outletId,
             tableId: table.id,
-            userId: null,
+            userId,
             customerName,
             customerContact: customerPhone,
             startsAt,

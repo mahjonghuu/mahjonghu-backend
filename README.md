@@ -50,11 +50,32 @@ VALUES ($1, lower(btrim($2)), $3, 'owner', true);
 - `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile. Tokens are not exposed in the JSON response. Invalid credentials and non-owner accounts receive the same `401` response.
 - `POST /auth/logout` clears the session cookie.
 - `GET /auth/me` validates the JWT cookie or `Authorization: Bearer <token>` (used by the Next.js proxy).
-- `GET /outlets/public` lists active, non-archived outlets for public discovery. `GET /outlets` and all outlet mutations require an owner JWT.
-- `GET /tables/public` lists tables belonging to active, non-archived outlets. `GET /tables` and all table mutations require an owner JWT.
+- `POST /auth/customer/request-code` accepts an invited customer email and emails a six-digit single-use code through Resend (`RESEND_API_KEY` and `EMAIL_FROM` required). Codes expire after ten minutes; PostgreSQL enforces per-email cooldown and hourly limits, per-IP hourly limits, and five verification attempts. Unknown emails receive the same request response without an email.
+- `POST /auth/customer/verify-code` accepts `{ "email": "...", "code": "123456" }`, consumes the code atomically and sets an eight-hour `HttpOnly` `customerToken` cookie. `GET /auth/customer/me` returns `{ authenticated, user }`; `POST /auth/customer/logout` clears that cookie. Customer JWTs cannot authorize owner routes, and owner JWTs cannot authorize customer-only access.
+- `GET /outlets/public` lists active, non-archived public outlets plus private outlets granted to the signed-in customer. `GET /outlets` and outlet mutations require an owner JWT.
+- `GET /tables/public` lists tables belonging only to those accessible active outlets. `GET /tables` and table mutations require an owner JWT.
 - Role authorization is enforced by the backend from verified JWT claims. The Next.js `proxy.ts` also asks the backend to validate the session before serving dashboard routes; backend API guards remain the authorization boundary.
 
 Browser requests use credentialed CORS from the configured `WEB_ORIGIN`. The web app and API must be same-site for the strict cookie policy; cookie-authenticated mutations also require the exact configured origin. JWT signing and verification require `JWT_SECRET`; the application refuses to start without it.
+
+## Private outlets and customer access
+
+Existing outlets remain public after the access migration. Owners can mark an
+outlet private independently of its operational status and grant customer access
+by email in the outlet workspace. A grant may expire; revocation prevents new
+checkouts but does not cancel an existing booking or payment.
+
+Customer sign-in uses email one-time codes through `POST /auth/customer/request-code`
+and `POST /auth/customer/verify-code`. Configure `RESEND_API_KEY` and a verified
+`EMAIL_FROM` sender for Resend delivery; without them, codes cannot be issued.
+Only owner-invited customer addresses receive a code. Customer sessions use
+a separate HttpOnly `customerToken` cookie, never the dashboard owner cookie.
+No customer registration or owner promotion is exposed publicly.
+
+Private outlet details, tables, availability, and checkout are available only
+to a signed-in customer with an unexpired outlet grant. A member books for the
+whole table; accompanying players do not need accounts. Public outlets retain
+guest checkout. Backend checkout rechecks access before creating any hold.
 
 ## API and operation
 

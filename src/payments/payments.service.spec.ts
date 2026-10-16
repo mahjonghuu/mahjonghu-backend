@@ -1,6 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
 import type { DataSource, Repository } from 'typeorm';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
+import type { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
 import type { CreateDokuCheckoutDto } from './dto/create-doku-checkout.dto.js';
 import { DokuClientService } from './doku-client.service.js';
@@ -22,6 +23,9 @@ function createService(
     sessions as Repository<PaymentSessionEntity>,
     dataSource as DataSource,
     doku as DokuClientService,
+    {
+      allowed: vi.fn().mockResolvedValue(true),
+    } as unknown as OutletAccessService,
     config as ConfigService,
   );
 }
@@ -37,7 +41,9 @@ describe('PaymentsService', () => {
     const paymentRows: Record<string, unknown>[] = [];
     const sessionRepository = {
       create: vi.fn((row) => ({ ...row })),
-      save: vi.fn(async (row) => Object.assign(sessionRecord, row, { id: 'session-1' })),
+      save: vi.fn(async (row) =>
+        Object.assign(sessionRecord, row, { id: 'session-1' }),
+      ),
       update: vi.fn(async (_id, row) => Object.assign(sessionRecord, row)),
     };
     const tableQuery = {
@@ -45,14 +51,21 @@ describe('PaymentsService', () => {
       andWhere: vi.fn().mockReturnThis(),
       orderBy: vi.fn().mockReturnThis(),
       setLock: vi.fn().mockReturnThis(),
-      getMany: vi.fn().mockResolvedValue([{ id: tableId, outletId, hourlyRateIdr: '75000' }]),
+      getMany: vi
+        .fn()
+        .mockResolvedValue([{ id: tableId, outletId, hourlyRateIdr: '75000' }]),
     };
     const tablesRepository = { createQueryBuilder: vi.fn(() => tableQuery) };
     const manager = {
       getRepository: vi.fn((entity) => {
         if (entity === PaymentSessionEntity) return sessionRepository;
         if (entity === TableEntity) return tablesRepository;
-        if (entity === OutletEntity) return { findOne: vi.fn().mockResolvedValue({ id: outletId, timezone: 'Asia/Jakarta' }) };
+        if (entity === OutletEntity)
+          return {
+            findOne: vi
+              .fn()
+              .mockResolvedValue({ id: outletId, timezone: 'Asia/Jakarta' }),
+          };
         throw new Error('Unexpected repository');
       }),
       query: vi.fn(async (sql: string, parameters: unknown[] = []) => {
@@ -94,8 +107,10 @@ describe('PaymentsService', () => {
     };
     const config = {
       get: vi.fn((key: string, fallback?: string) =>
-        key === 'WEB_PUBLIC_URL' ? 'https://booking.example.com'
-          : key === 'BACKEND_PUBLIC_URL' ? 'https://api.example.com'
+        key === 'WEB_PUBLIC_URL'
+          ? 'https://booking.example.com'
+          : key === 'BACKEND_PUBLIC_URL'
+            ? 'https://api.example.com'
             : fallback,
       ),
     };
@@ -114,20 +129,82 @@ describe('PaymentsService', () => {
 
     const checkout = await service.createCheckout('dev', dto);
 
-    expect(checkout.checkoutUrl).toBe('https://sandbox.doku.com/checkout-link/token');
-    expect(doku.createCheckout).toHaveBeenCalledWith('dev', expect.objectContaining({ amount: 150_000 }));
+    expect(checkout.checkoutUrl).toBe(
+      'https://sandbox.doku.com/checkout-link/token',
+    );
+    expect(doku.createCheckout).toHaveBeenCalledWith(
+      'dev',
+      expect.objectContaining({ amount: 150_000 }),
+    );
     expect(bookingRows).toHaveLength(2);
-    expect(bookingRows.map((row) => row.totalAmountIdr)).toEqual(['75000', '75000']);
-    expect(bookingRows.every((row) => row.holdExpiresAt.getTime() === providerExpiry.getTime())).toBe(true);
+    expect(bookingRows.map((row) => row.totalAmountIdr)).toEqual([
+      '75000',
+      '75000',
+    ]);
+    expect(
+      bookingRows.every(
+        (row) => row.holdExpiresAt.getTime() === providerExpiry.getTime(),
+      ),
+    ).toBe(true);
     expect(paymentRows).toHaveLength(2);
-    expect(paymentRows.every((row) => row.paymentSessionId === 'session-1')).toBe(true);
-    expect(manager.query.mock.calls.filter(([sql]) => sql.includes('JOIN (VALUES'))).toHaveLength(1);
-    expect(manager.query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO bookings'))).toHaveLength(1);
-    expect(manager.query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO payment_session_bookings'))).toHaveLength(1);
-    expect(manager.query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO payments'))).toHaveLength(1);
+    expect(
+      paymentRows.every((row) => row.paymentSessionId === 'session-1'),
+    ).toBe(true);
+    expect(
+      manager.query.mock.calls.filter(([sql]) => sql.includes('JOIN (VALUES')),
+    ).toHaveLength(1);
+    expect(
+      manager.query.mock.calls.filter(([sql]) =>
+        sql.includes('INSERT INTO bookings'),
+      ),
+    ).toHaveLength(1);
+    expect(
+      manager.query.mock.calls.filter(([sql]) =>
+        sql.includes('INSERT INTO payment_session_bookings'),
+      ),
+    ).toHaveLength(1);
+    expect(
+      manager.query.mock.calls.filter(([sql]) =>
+        sql.includes('INSERT INTO payments'),
+      ),
+    ).toHaveLength(1);
     expect(tablesRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
     expect(tableQuery.setLock).toHaveBeenCalledWith('pessimistic_write');
     expect(tableQuery.orderBy).toHaveBeenCalledWith('table.id', 'ASC');
+  });
+
+  it('rejects a private checkout before creating a booking hold', async () => {
+    const query = vi.fn();
+    const manager = {
+      getRepository: vi.fn((entity) =>
+        entity === OutletEntity
+          ? { findOne: vi.fn().mockResolvedValue({ id: outletId }) }
+          : {},
+      ),
+      query,
+    };
+    const dataSource = {
+      transaction: vi.fn((callback) => callback(manager)),
+    };
+    const service = new PaymentsService(
+      {} as Repository<PaymentSessionEntity>,
+      dataSource as unknown as DataSource,
+      {} as DokuClientService,
+      {
+        allowed: vi.fn().mockResolvedValue(false),
+      } as unknown as OutletAccessService,
+      {} as ConfigService,
+    );
+    await expect(
+      service.createCheckout('dev', {
+        outletId,
+        customerName: 'Guest',
+        customerPhone: '081234567890',
+        customerEmail: 'guest@example.com',
+        sessions: [{ tableId, startsAt, durationHours: 1 }],
+      }),
+    ).rejects.toThrow('Outlet tidak ditemukan.');
+    expect(query).not.toHaveBeenCalled();
   });
 
   it('confirms linked bookings only for a signed success transition', async () => {
@@ -143,9 +220,14 @@ describe('PaymentsService', () => {
       findOne: vi.fn().mockResolvedValue(session),
       update: vi.fn(),
     };
-    const query = vi.fn()
+    const query = vi
+      .fn()
       .mockResolvedValueOnce([
-        { id: 'booking-1', status: 'pending', holdExpiresAt: new Date(Date.now() + 60_000) },
+        {
+          id: 'booking-1',
+          status: 'pending',
+          holdExpiresAt: new Date(Date.now() + 60_000),
+        },
       ])
       .mockResolvedValueOnce([{ conflict: false }])
       .mockResolvedValue([]);
@@ -156,30 +238,35 @@ describe('PaymentsService', () => {
     const dataSource = {
       transaction: vi.fn((callback) => callback(manager)),
     };
-    const service = createService(
-      sessionRepository,
-      dataSource,
+    const service = createService(sessionRepository, dataSource);
+
+    await expect(
+      service.handleNotification(
+        'dev',
+        {
+          order: { invoice_number: 'MHORDER123', amount: 150000 },
+          transaction: { status: 'SUCCESS', date: '2026-10-12T08:01:00Z' },
+        },
+        'doku-event-1',
+      ),
+    ).resolves.toEqual({ message: 'SUCCESS' });
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'confirmed'"),
+      ['session-1'],
     );
-
-    await expect(service.handleNotification(
-      'dev',
-      {
-        order: { invoice_number: 'MHORDER123', amount: 150000 },
-        transaction: { status: 'SUCCESS', date: '2026-10-12T08:01:00Z' },
-      },
-      'doku-event-1',
-    )).resolves.toEqual({ message: 'SUCCESS' });
-
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("SET status = 'confirmed'"), ['session-1']);
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'succeeded'"),
       ['session-1', new Date('2026-10-12T08:01:00Z')],
     );
-    expect(sessionRepository.update).toHaveBeenCalledWith('session-1', expect.objectContaining({
-      status: 'succeeded',
-      notificationRequestId: 'doku-event-1',
-      reservationNeedsReview: false,
-    }));
+    expect(sessionRepository.update).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        status: 'succeeded',
+        notificationRequestId: 'doku-event-1',
+        reservationNeedsReview: false,
+      }),
+    );
   });
 
   it('recovers a verified on-time success after an uncertain checkout response', async () => {
@@ -197,7 +284,8 @@ describe('PaymentsService', () => {
       findOne: vi.fn().mockResolvedValue(session),
       update: vi.fn(),
     };
-    const query = vi.fn()
+    const query = vi
+      .fn()
       .mockResolvedValueOnce([{ id: 'booking-1', status: 'expired' }])
       .mockResolvedValueOnce([{ conflict: false }])
       .mockResolvedValue([]);
@@ -209,7 +297,10 @@ describe('PaymentsService', () => {
       'dev',
       {
         order: { invoice_number: 'MHORDER123', amount: 75000 },
-        transaction: { status: 'SUCCESS', date: new Date(now.getTime() + 5 * 60_000).toISOString() },
+        transaction: {
+          status: 'SUCCESS',
+          date: new Date(now.getTime() + 5 * 60_000).toISOString(),
+        },
       },
       'doku-recovered-event',
     );
@@ -218,10 +309,13 @@ describe('PaymentsService', () => {
       expect.stringContaining("SET status = 'confirmed'"),
       ['session-1'],
     );
-    expect(sessionRepository.update).toHaveBeenCalledWith('session-1', expect.objectContaining({
-      status: 'succeeded',
-      reservationNeedsReview: false,
-    }));
+    expect(sessionRepository.update).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        status: 'succeeded',
+        reservationNeedsReview: false,
+      }),
+    );
   });
 
   it('acknowledges a DOKU failed-method attempt without failing a retryable Checkout', async () => {
@@ -229,14 +323,16 @@ describe('PaymentsService', () => {
     const dataSource = { transaction: vi.fn() };
     const service = createService(sessions, dataSource);
 
-    await expect(service.handleNotification(
-      'dev',
-      {
-        order: { invoice_number: 'MHORDER123', amount: 150000 },
-        transaction: { status: 'FAILED' },
-      },
-      'doku-event-failed',
-    )).resolves.toEqual({ message: 'SUCCESS' });
+    await expect(
+      service.handleNotification(
+        'dev',
+        {
+          order: { invoice_number: 'MHORDER123', amount: 150000 },
+          transaction: { status: 'FAILED' },
+        },
+        'doku-event-failed',
+      ),
+    ).resolves.toEqual({ message: 'SUCCESS' });
 
     expect(sessions.findOne).not.toHaveBeenCalled();
     expect(dataSource.transaction).not.toHaveBeenCalled();
@@ -275,7 +371,13 @@ describe('PaymentsService', () => {
     const result = await service.getPublicStatus('MHORDER123');
 
     expect(result.status).toBe('expired');
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("SET status = 'expired'"), ['session-1']);
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("SET status = 'failed'"), ['session-1']);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'expired'"),
+      ['session-1'],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'failed'"),
+      ['session-1'],
+    );
   });
 });

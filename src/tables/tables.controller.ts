@@ -9,9 +9,12 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Req,
   Patch,
   Post,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import { CustomerAuthService } from '../auth/customer-auth.service.js';
 import { CreateTableDto } from './dto/create-table.dto.js';
 import { UpdateTableDto } from './dto/update-table.dto.js';
 import { TablesService } from './tables.service.js';
@@ -19,12 +22,15 @@ import { TablesService } from './tables.service.js';
 /** Local development API for mahjong table management. */
 @Controller('tables')
 export class TablesController {
-  constructor(private readonly tables: TablesService) {}
+  constructor(
+    private readonly tables: TablesService,
+    private readonly customerAuth: CustomerAuthService,
+  ) {}
 
   /** Lists active tables for public outlet discovery. */
   @Get('public')
-  findPublic() {
-    return this.tables.findPublic();
+  async findPublic(@Req() request: Request) {
+    return this.tables.findPublic(await this.customerAuth.currentUser(request));
   }
 
   /** Returns active tables with occupancy derived from live bookings. */

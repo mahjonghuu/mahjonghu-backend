@@ -1,5 +1,6 @@
 import { UseGuards } from '@nestjs/common';
 import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { CustomerAuthService } from '../auth/customer-auth.service.js';
 import {
   Body,
   Controller,
@@ -11,15 +12,23 @@ import {
   Post,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import { GrantOutletAccessDto } from './dto/grant-outlet-access.dto.js';
+import { OutletAccessService } from './outlet-access.service.js';
 import { CreateOutletDto } from './dto/create-outlet.dto.js';
 import { UpdateOutletDto } from './dto/update-outlet.dto.js';
 import { OutletsService } from './outlets.service.js';
 
-/** Local development API for outlet management; add owner authentication before deployment. */
+/** Owner outlet management and customer-aware discovery. */
 @Controller('outlets')
 export class OutletsController {
-  constructor(private readonly outlets: OutletsService) {}
+  constructor(
+    private readonly outlets: OutletsService,
+    private readonly access: OutletAccessService,
+    private readonly customerAuth: CustomerAuthService,
+  ) {}
 
   /** Returns outlets that have not been archived. */
   @UseGuards(JWTAuthGuard)
@@ -30,8 +39,34 @@ export class OutletsController {
 
   /** Returns active outlets for public discovery. */
   @Get('public')
-  findPublic() {
-    return this.outlets.findPublic();
+  async findPublic(@Req() request: Request) {
+    const customerId = await this.customerAuth.currentUser(request);
+    return this.outlets.findPublic(customerId);
+  }
+
+  @UseGuards(JWTAuthGuard)
+  @Get(':id/access')
+  listAccess(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.access.list(id);
+  }
+
+  @UseGuards(JWTAuthGuard)
+  @Post(':id/access')
+  grantAccess(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: GrantOutletAccessDto,
+  ) {
+    return this.access.grant(id, body.email, body.expiresAt);
+  }
+
+  @UseGuards(JWTAuthGuard)
+  @Delete(':id/access/:userId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async revokeAccess(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+  ): Promise<void> {
+    await this.access.revoke(id, userId);
   }
 
   /** Creates an outlet. */

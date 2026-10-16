@@ -27,6 +27,7 @@ describe('OutletsService', () => {
         name: 'MahjongHu Menteng',
         city: 'Jakarta Pusat',
         address: 'Jalan Menteng',
+        visibility: 'public',
         active: true,
         openingHour: '9',
         closingHour: '23',
@@ -42,6 +43,7 @@ describe('OutletsService', () => {
         city: 'Jakarta Pusat',
         address: 'Jalan Menteng',
         active: true,
+        visibility: 'public',
         openingHour: 9,
         closingHour: 23,
         tableCount: 7,
@@ -53,7 +55,9 @@ describe('OutletsService', () => {
   it('trims required text and defaults new outlets to active', async () => {
     const { repository, service } = createService();
     const persisted = { id: 'outlet-1', isActive: true } as OutletEntity;
-    repository.create.mockImplementation((outlet: Partial<OutletEntity>) => outlet);
+    repository.create.mockImplementation(
+      (outlet: Partial<OutletEntity>) => outlet,
+    );
     repository.save.mockResolvedValue(persisted);
 
     await expect(
@@ -69,6 +73,7 @@ describe('OutletsService', () => {
       address: 'Jalan Menteng',
       openingHour: 12,
       closingHour: 22,
+      visibility: 'public',
       isActive: true,
     });
   });
@@ -78,7 +83,9 @@ describe('OutletsService', () => {
     repository.findOneBy.mockResolvedValue({ id: 'outlet-1', isActive: true });
     repository.query.mockResolvedValue([{ occupied: true }]);
 
-    await expect(service.update('outlet-1', { active: false })).rejects.toMatchObject({
+    await expect(
+      service.update('outlet-1', { active: false }),
+    ).rejects.toMatchObject({
       status: 409,
       message: 'Selesaikan penggunaan meja sebelum menonaktifkan outlet.',
     });
@@ -116,7 +123,9 @@ describe('OutletsService', () => {
 
   it('maps duplicate outlet names to a conflict response', async () => {
     const { repository, service } = createService();
-    repository.create.mockImplementation((outlet: Partial<OutletEntity>) => outlet);
+    repository.create.mockImplementation(
+      (outlet: Partial<OutletEntity>) => outlet,
+    );
     repository.save.mockRejectedValue({ driverError: { code: '23505' } });
 
     await expect(
@@ -125,6 +134,9 @@ describe('OutletsService', () => {
         city: 'Jakarta Pusat',
         address: 'Jalan Menteng',
       }),
-    ).rejects.toMatchObject({ status: 409, message: 'Nama outlet sudah digunakan.' });
+    ).rejects.toMatchObject({
+      status: 409,
+      message: 'Nama outlet sudah digunakan.',
+    });
   });
 });

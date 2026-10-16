@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -29,6 +30,10 @@ export class CreateOutletDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @IsOptional()
+  @IsIn(['public', 'private'])
+  visibility?: 'public' | 'private';
 
   @IsOptional()
   @IsInt()
