@@ -1,8 +1,10 @@
+import { ConflictException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { BookingEntity } from '../bookings/entities/booking.entity.js';
+import { BookingsService } from '../bookings/bookings.service.js';
 import { InitialSchema1791590400000 } from '../database/migrations/1791590400000-InitialSchema.js';
 import { AddDokuPaymentSessions1791763200000 } from '../database/migrations/1791763200000-AddDokuPaymentSessions.js';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
@@ -54,7 +56,7 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
     }
   });
 
-  it('skips a locked session during bulk expiry and preserves a verified on-time notification', async () => {
+  it('preserves a verified on-time notification and leaves cancelled holds untouched during bulk expiry', async () => {
     const outlet = (await dataSource.query(
       `INSERT INTO outlets (name, city, address) VALUES ('Integration outlet', 'Jakarta', 'Test street') RETURNING id`,
     )) as { id: string }[];
@@ -63,7 +65,7 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
     const ids: { sessionId: string; bookingId: string; paymentId: string }[] =
       [];
 
-    for (let index = 0; index < 2; index += 1) {
+    for (let index = 0; index < 3; index += 1) {
       const table = (await dataSource.query(
         `INSERT INTO mahjong_tables (outlet_id, name, hourly_rate_idr)
          VALUES ($1, $2, 75000) RETURNING id`,
@@ -108,6 +110,13 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
       });
     }
 
+    await new BookingsService(
+      dataSource.getRepository(BookingEntity),
+      dataSource.getRepository(TableEntity),
+      dataSource.getRepository(OutletEntity),
+      {} as OutletAccessService,
+    ).cancel(ids[2].bookingId);
+
     const service = new PaymentsService(
       dataSource.getRepository(PaymentSessionEntity),
       dataSource,
@@ -138,7 +147,11 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
         `SELECT status FROM payment_sessions WHERE id = ANY($1::uuid[]) ORDER BY invoice_number`,
         [ids.map((row) => row.sessionId)],
       )) as { status: string }[];
-      expect(states.map((row) => row.status)).toEqual(['pending', 'expired']);
+      expect(states.map((row) => row.status)).toEqual([
+        'pending',
+        'expired',
+        'expired',
+      ]);
       await lock.rollbackTransaction();
       await notification;
       await service['expireOverdueSessions']();
@@ -170,7 +183,212 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
         booking_status: 'expired',
         payment_status: 'failed',
       },
+      {
+        session_status: 'expired',
+        booking_status: 'cancelled',
+        payment_status: 'failed',
+      },
     ]);
+  });
+
+  it('preserves cancelled pending bookings and records later DOKU success for manual review', async () => {
+    const outlet = (await dataSource.query(
+      `INSERT INTO outlets (name, city, address)
+       VALUES ('Cancellation outlet', 'Jakarta', 'Test street') RETURNING id`,
+    )) as { id: string }[];
+    const table = (await dataSource.query(
+      `INSERT INTO mahjong_tables (outlet_id, name, hourly_rate_idr)
+       VALUES ($1, 'Cancellation table', 75000) RETURNING id`,
+      [outlet[0].id],
+    )) as { id: string }[];
+    const expiresAt = new Date(Date.now() + 10 * 60_000);
+    const startsAt = new Date(Date.now() + 2 * 86_400_000);
+    const endsAt = new Date(startsAt.getTime() + 3_600_000);
+    const session = (await dataSource.query(
+      `INSERT INTO payment_sessions
+       (invoice_number, environment, status, customer_name, customer_phone, customer_email, amount_idr, expires_at)
+       VALUES ('MHCANCELCHECKOUT', 'dev', 'pending', 'Guest', '081234567890', 'guest@example.com', 75000, $1)
+       RETURNING id`,
+      [expiresAt],
+    )) as { id: string }[];
+    const booking = (await dataSource.query(
+      `INSERT INTO bookings
+       (reference, outlet_id, table_id, customer_name, customer_contact,
+        starts_at, ends_at, duration_hours, hourly_rate_idr, total_amount_idr,
+        status, hold_expires_at)
+       VALUES ('MHCANCELBOOKING', $1, $2, 'Guest', '081234567890',
+               $3, $4, 1, 75000, 75000, 'pending', $5)
+       RETURNING id`,
+      [outlet[0].id, table[0].id, startsAt, endsAt, expiresAt],
+    )) as { id: string }[];
+    await dataSource.query(
+      `INSERT INTO payment_session_bookings (payment_session_id, booking_id)
+       VALUES ($1, $2)`,
+      [session[0].id, booking[0].id],
+    );
+    await dataSource.query(
+      `INSERT INTO payments
+       (booking_id, payment_session_id, kind, status, amount_idr, provider, idempotency_key)
+       VALUES ($1, $2, 'charge', 'pending', 75000, 'DOKU_DEV', 'cancel-integration')`,
+      [booking[0].id, session[0].id],
+    );
+
+    const bookings = new BookingsService(
+      dataSource.getRepository(BookingEntity),
+      dataSource.getRepository(TableEntity),
+      dataSource.getRepository(OutletEntity),
+      {} as OutletAccessService,
+    );
+    await expect(bookings.cancel(booking[0].id)).resolves.toEqual({
+      id: booking[0].id,
+      status: 'cancelled',
+    });
+    const beforeNotification = (await dataSource.query(
+      `SELECT b.status AS booking_status, b.hold_expires_at,
+         p.status AS payment_status, s.status AS session_status
+       FROM bookings b
+       JOIN payments p ON p.booking_id = b.id
+       JOIN payment_sessions s ON s.id = p.payment_session_id
+       WHERE b.id = $1`,
+      [booking[0].id],
+    )) as {
+      booking_status: string;
+      hold_expires_at: Date | null;
+      payment_status: string;
+      session_status: string;
+    }[];
+    expect(beforeNotification[0]).toEqual({
+      booking_status: 'cancelled',
+      hold_expires_at: null,
+      payment_status: 'pending',
+      session_status: 'pending',
+    });
+    await expect(bookings.cancel(booking[0].id)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+
+    // The exclusion constraint allows the freed interval to be booked again.
+    await dataSource.query(
+      `INSERT INTO bookings
+       (reference, outlet_id, table_id, customer_name, customer_contact,
+        starts_at, ends_at, duration_hours, hourly_rate_idr, total_amount_idr, status)
+       VALUES ('MHREBOOKED', $1, $2, 'New Guest', '081200000000',
+               $3, $4, 1, 75000, 75000, 'confirmed')`,
+      [outlet[0].id, table[0].id, startsAt, endsAt],
+    );
+    const payments = new PaymentsService(
+      dataSource.getRepository(PaymentSessionEntity),
+      dataSource,
+      {} as DokuClientService,
+      {} as OutletAccessService,
+      {} as ConfigService,
+    );
+    await payments.handleNotification(
+      'dev',
+      {
+        order: { invoice_number: 'MHCANCELCHECKOUT', amount: 75000 },
+        transaction: { status: 'SUCCESS', date: new Date().toISOString() },
+      },
+      'cancel-integration-notification',
+    );
+    const afterNotification = (await dataSource.query(
+      `SELECT b.status AS booking_status, p.status AS payment_status,
+         s.status AS session_status, s.reservation_needs_review
+       FROM bookings b
+       JOIN payments p ON p.booking_id = b.id
+       JOIN payment_sessions s ON s.id = p.payment_session_id
+       WHERE b.id = $1`,
+      [booking[0].id],
+    )) as {
+      booking_status: string;
+      payment_status: string;
+      session_status: string;
+      reservation_needs_review: boolean;
+    }[];
+    expect(afterNotification[0]).toEqual({
+      booking_status: 'cancelled',
+      payment_status: 'succeeded',
+      session_status: 'succeeded',
+      reservation_needs_review: true,
+    });
+  });
+
+  it('cancels a future confirmed booking but refuses one whose start has passed', async () => {
+    const outlet = (await dataSource.query(
+      `INSERT INTO outlets (name, city, address)
+       VALUES ('Confirmed outlet', 'Jakarta', 'Test street') RETURNING id`,
+    )) as { id: string }[];
+    const table = (await dataSource.query(
+      `INSERT INTO mahjong_tables (outlet_id, name, hourly_rate_idr)
+       VALUES ($1, 'Confirmed table', 75000) RETURNING id`,
+      [outlet[0].id],
+    )) as { id: string }[];
+    const startsAt = new Date(Date.now() + 86_400_000);
+    const endsAt = new Date(startsAt.getTime() + 3_600_000);
+    const booking = (await dataSource.query(
+      `INSERT INTO bookings
+       (reference, outlet_id, table_id, customer_name, customer_contact,
+        starts_at, ends_at, duration_hours, hourly_rate_idr, total_amount_idr, status)
+       VALUES ('MHFUTURECONFIRMED', $1, $2, 'Guest', '081234567890',
+               $3, $4, 1, 75000, 75000, 'confirmed') RETURNING id`,
+      [outlet[0].id, table[0].id, startsAt, endsAt],
+    )) as { id: string }[];
+    const session = (await dataSource.query(
+      `INSERT INTO payment_sessions
+       (invoice_number, environment, status, customer_name, customer_phone, customer_email, amount_idr, expires_at, settled_at)
+       VALUES ('MHCONFIRMEDCHECKOUT', 'dev', 'succeeded', 'Guest', '081234567890',
+               'guest@example.com', 75000, $1, CURRENT_TIMESTAMP) RETURNING id`,
+      [new Date(Date.now() + 10 * 60_000)],
+    )) as { id: string }[];
+    await dataSource.query(
+      `INSERT INTO payment_session_bookings (payment_session_id, booking_id)
+       VALUES ($1, $2)`,
+      [session[0].id, booking[0].id],
+    );
+    await dataSource.query(
+      `INSERT INTO payments
+       (booking_id, payment_session_id, kind, status, amount_idr,
+        provider, idempotency_key, settled_at)
+       VALUES ($1, $2, 'charge', 'succeeded', 75000, 'DOKU_DEV',
+               'confirmed-cancel-integration', CURRENT_TIMESTAMP)`,
+      [booking[0].id, session[0].id],
+    );
+    const bookings = new BookingsService(
+      dataSource.getRepository(BookingEntity),
+      dataSource.getRepository(TableEntity),
+      dataSource.getRepository(OutletEntity),
+      {} as OutletAccessService,
+    );
+    await expect(bookings.cancel(booking[0].id)).resolves.toEqual({
+      id: booking[0].id,
+      status: 'cancelled',
+    });
+    const payment = (await dataSource.query(
+      `SELECT s.status AS session_status, p.status AS payment_status
+       FROM payments p JOIN payment_sessions s ON s.id = p.payment_session_id
+       WHERE p.booking_id = $1`,
+      [booking[0].id],
+    )) as { session_status: string; payment_status: string }[];
+    expect(payment).toEqual([
+      {
+        session_status: 'succeeded',
+        payment_status: 'succeeded',
+      },
+    ]);
+
+    const pastStartsAt = new Date(Date.now() - 2 * 3_600_000);
+    const pastEndsAt = new Date(pastStartsAt.getTime() + 3_600_000);
+    const started = (await dataSource.query(
+      `INSERT INTO bookings
+       (reference, outlet_id, table_id, customer_name, customer_contact,
+        starts_at, ends_at, duration_hours, hourly_rate_idr, total_amount_idr, status)
+       VALUES ('MHSTARTEDCONFIRMED', $1, $2, 'Guest', '081234567890',
+               $3, $4, 1, 75000, 75000, 'confirmed') RETURNING id`,
+      [outlet[0].id, table[0].id, pastStartsAt, pastEndsAt],
+    )) as { id: string }[];
+    await expect(bookings.cancel(started[0].id)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 
   it('waits for a table update and prices checkout from the locked row', async () => {

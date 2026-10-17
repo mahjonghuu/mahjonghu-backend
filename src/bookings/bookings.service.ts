@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -94,6 +95,26 @@ export class BookingsService {
       .addSelect('booking.holdExpiresAt', 'holdExpiresAt')
       .orderBy('booking.startsAt', 'DESC')
       .getRawMany();
+  }
+
+  /** Releases a future booking without changing its DOKU charge or payment session. */
+  async cancel(id: string): Promise<Pick<BookingEntity, 'id' | 'status'>> {
+    // A single conditional update serializes with the notification's booking row
+    // lock and prevents its subsequent success from re-confirming a cancellation.
+    const rows: Pick<BookingEntity, 'id' | 'status'>[] =
+      await this.bookings.query(
+        `UPDATE bookings
+         SET status = 'cancelled', hold_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+           AND (status = 'pending' OR (status = 'confirmed' AND starts_at > CURRENT_TIMESTAMP))
+         RETURNING id, status`,
+        [id],
+      );
+    if (rows[0]) return rows[0];
+    if (!(await this.bookings.findOneBy({ id }))) {
+      throw new NotFoundException('Booking tidak ditemukan.');
+    }
+    throw new ConflictException('Booking tidak dapat dibatalkan.');
   }
 
   private validateInterval(startsAt: Date, durationHours: number): void {
