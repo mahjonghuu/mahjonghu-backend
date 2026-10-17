@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build && npm run migration:deploy",
+  "functions": {
+    "src/main.ts": {
+      "maxDuration": 60
+    }
+  }
+}

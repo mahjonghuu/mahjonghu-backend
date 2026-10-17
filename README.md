@@ -45,6 +45,47 @@ INSERT INTO users (auth_subject, email, password_hash, role, is_active)
 VALUES ($1, lower(btrim($2)), $3, 'owner', true);
 ```
 
+## Deploy to Vercel
+
+Create a separate Vercel project with **Root Directory** set to
+`mahjonghu-backend` (not the repository root). Vercel detects NestJS from
+`src/main.ts`; `vercel.json` builds the app, runs pending TypeORM migrations,
+and only then bundles the function (maximum request duration: 60 seconds).
+If compilation or migration fails, the deployment fails without replacing
+the currently serving deployment. Do not set an output directory or add an
+`api/` shim.
+
+Set the backend environment variables in Vercel Project Settings:
+`DATABASE_URL` (PostgreSQL transaction pooler), `JWT_SECRET`, `WEB_ORIGIN`
+(exact HTTPS origin of the web app), `WEB_PUBLIC_URL` (web app origin), and
+`BACKEND_PUBLIC_URL` (this backend's public origin). Set the DOKU credentials
+for the checkout environments in use, plus `RESEND_API_KEY` and `EMAIL_FROM`
+if customer email login is enabled. Do not upload `.env` to Vercel. Build
+migrations require a database connection and permission for the existing
+migrations (including `btree_gist`); the `migration:deploy` script consumes
+the already-built `dist` output, so no second build runs.
+
+**Preview and Production must use separate `DATABASE_URL` values.** Every
+Vercel build runs pending migrations against its configured database,
+including Preview deployments; sharing the Production URL lets Preview
+builds change the Production schema. Back up the target database and review
+new migrations before deployment. Use backward-compatible schema changes:
+the old deployment can still serve requests after a migration has applied,
+even if the new build later fails. TypeORM records completed migrations;
+already-applied migrations are not rerun.
+
+Deploy via the Vercel dashboard or from this directory with Vercel CLI
+48.4.0 or later (`vercel` for a preview, `vercel --prod` for production).
+Use same-site HTTPS domains for the web and API (for example,
+`booking.example.com` and `api.example.com`): owner/customer cookies are
+`SameSite=Strict`, so two unrelated `*.vercel.app` project hosts cannot
+support authenticated browser requests. Configure `NEXT_PUBLIC_API_URL` on
+the frontend to the backend origin and register the deployed DOKU
+notification URLs. Vercel functions do not run continuously; don't rely on
+the in-process expiry timer as a scheduled job. Availability and lookup
+already treat elapsed pending holds as expired, while status checks expire
+overdue payment sessions on access.
+
 ## Authentication and authorization
 
 - `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile. Tokens are not exposed in the JSON response. Invalid credentials and non-owner accounts receive the same `401` response.

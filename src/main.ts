@@ -19,6 +19,12 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  await app.listen(config.get('PORT', 3001), '127.0.0.1');
+  const port = config.get<number>('PORT', 3001);
+  if (process.env.VERCEL) {
+    // Vercel routes requests to the recognized Nest entrypoint; do not bind localhost.
+    await app.listen(port);
+  } else {
+    await app.listen(port, '127.0.0.1');
+  }
 }
 await bootstrap();
