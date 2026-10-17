@@ -63,13 +63,21 @@ export class CustomerAuthService {
     if (limits[0].request_count > 120) {
       throw new HttpException(RATE_LIMIT, HttpStatus.TOO_MANY_REQUESTS);
     }
-    const customer = await this.users
-      .createQueryBuilder('user')
-      .where('LOWER(BTRIM(user.email)) = :email', { email: normalized })
-      .andWhere('user.role = :role AND user.isActive = true', {
-        role: 'customer',
-      })
-      .getOne();
+    const access: { allowed: boolean }[] = await this.users.query(
+      `SELECT EXISTS (
+        SELECT 1 FROM users u
+        JOIN outlet_access a ON a.user_id = u.id
+        JOIN outlets o ON o.id = a.outlet_id
+        WHERE LOWER(BTRIM(u.email)) = $1
+          AND u.role = 'customer' AND u.is_active = true
+          AND (a.expires_at IS NULL OR a.expires_at > CURRENT_TIMESTAMP)
+          AND o.is_active = true AND o.archived_at IS NULL
+      ) AS allowed`,
+      [normalized],
+    );
+    if (access[0]?.allowed !== true) {
+      throw new ForbiddenException('Email tidak terdaftar.');
+    }
 
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
     const hash = this.hashCode(normalized, code);
@@ -94,8 +102,6 @@ export class CustomerAuthService {
     if (rows.length === 0) {
       throw new HttpException(RATE_LIMIT, HttpStatus.TOO_MANY_REQUESTS);
     }
-    // Keep the same persisted cooldown for uninvited addresses without emailing them.
-    if (!customer) return;
     try {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',

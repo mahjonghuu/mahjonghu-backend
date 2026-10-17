@@ -50,7 +50,7 @@ VALUES ($1, lower(btrim($2)), $3, 'owner', true);
 - `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile. Tokens are not exposed in the JSON response. Invalid credentials and non-owner accounts receive the same `401` response.
 - `POST /auth/logout` clears the session cookie.
 - `GET /auth/me` validates the JWT cookie or `Authorization: Bearer <token>` (used by the Next.js proxy).
-- `POST /auth/customer/request-code` accepts an invited customer email and emails a six-digit single-use code through Resend (`RESEND_API_KEY` and `EMAIL_FROM` required). Codes expire after ten minutes; PostgreSQL enforces per-email cooldown and hourly limits, per-IP hourly limits, and five verification attempts. Unknown emails receive the same request response without an email.
+- `POST /auth/customer/request-code` sends a six-digit single-use code through Resend only when the active customer email has an unexpired grant to an active, non-archived outlet. Emails without eligible outlet access receive `403` with `Email tidak terdaftar.` and no challenge or email is created. `RESEND_API_KEY` and `EMAIL_FROM` are required; codes expire after ten minutes. PostgreSQL enforces per-email cooldown and hourly limits for eligible addresses, per-IP hourly limits for all requests, and five verification attempts.
 - `POST /auth/customer/verify-code` accepts `{ "email": "...", "code": "123456" }`, consumes the code atomically and sets an eight-hour `HttpOnly` `customerToken` cookie. `GET /auth/customer/me` returns `{ authenticated, user }`; `POST /auth/customer/logout` clears that cookie. Customer JWTs cannot authorize owner routes, and owner JWTs cannot authorize customer-only access.
 - `GET /outlets/public` lists active, non-archived public outlets plus private outlets granted to the signed-in customer. `GET /outlets` and outlet mutations require an owner JWT.
 - `GET /tables/public` lists tables belonging only to those accessible active outlets. `GET /tables` and table mutations require an owner JWT.
@@ -68,8 +68,10 @@ checkouts but does not cancel an existing booking or payment.
 Customer sign-in uses email one-time codes through `POST /auth/customer/request-code`
 and `POST /auth/customer/verify-code`. Configure `RESEND_API_KEY` and a verified
 `EMAIL_FROM` sender for Resend delivery; without them, codes cannot be issued.
-Only owner-invited customer addresses receive a code. Customer sessions use
-a separate HttpOnly `customerToken` cookie, never the dashboard owner cookie.
+Only active customer addresses with a current owner-issued grant to an active
+outlet receive a code; other addresses see `Email tidak terdaftar.` Customer
+sessions use a separate HttpOnly `customerToken` cookie, never the dashboard
+owner cookie.
 No customer registration or owner promotion is exposed publicly.
 
 Private outlet details, tables, availability, and checkout are available only

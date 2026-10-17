@@ -13,15 +13,8 @@ const customer = {
 };
 
 function setup() {
-  const userQuery = {
-    where: vi.fn(),
-    andWhere: vi.fn(),
-    getOne: vi.fn().mockResolvedValue(customer),
-  };
-  userQuery.where.mockReturnValue(userQuery);
-  userQuery.andWhere.mockReturnValue(userQuery);
   const users = {
-    createQueryBuilder: vi.fn().mockReturnValue(userQuery),
+    query: vi.fn().mockResolvedValue([{ allowed: true }]),
     findOneBy: vi.fn().mockResolvedValue(customer),
   };
   const challenges = { query: vi.fn().mockResolvedValue([{ email }]) };
@@ -71,7 +64,6 @@ function setup() {
   return {
     service,
     users,
-    userQuery,
     challenges,
     ipLimits,
     manager,
@@ -93,12 +85,15 @@ describe('CustomerAuthService', () => {
     expect(ipLimits.query).not.toHaveBeenCalled();
   });
 
-  it('does not send codes or reveal whether an uninvited email exists', async () => {
-    const { service, userQuery, challenges, request } = setup();
-    userQuery.getOne.mockResolvedValue(null);
+  it('rejects an email without a live outlet grant before creating a challenge or sending mail', async () => {
+    const { service, users, challenges, request } = setup();
+    users.query.mockResolvedValue([{ allowed: false }]);
     vi.stubGlobal('fetch', vi.fn());
-    await expect(service.requestCode(email, request)).resolves.toBeUndefined();
-    expect(challenges.query).toHaveBeenCalledTimes(1);
+    await expect(service.requestCode(email, request)).rejects.toMatchObject({
+      status: 403,
+      response: { message: 'Email tidak terdaftar.' },
+    });
+    expect(challenges.query).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
