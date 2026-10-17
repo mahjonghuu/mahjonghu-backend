@@ -1,8 +1,9 @@
 # Bookings module
 
-Provides public booking availability and owner-only booking records and cancellation. Public pending bookings are created only as part of a DOKU checkout so payment and table holds remain linked:
+Provides public booking availability and phone-only booking lookup, and owner-only booking records and cancellation. Public pending bookings are created only as part of a DOKU checkout so payment and table holds remain linked:
 
 - `GET /bookings/availability?outletId=<uuid>&startsAt=<ISO-8601>&durationHours=<integer>` returns available tables and current hourly IDR rates.
+- `POST /bookings/lookup` is public and accepts `{ "phone": "<checkout phone>" }` without an invoice or OTP. Phone comparison ignores spaces and hyphens and treats Indonesian `+62`/`62` and leading `0` as equivalent. Every matching booking across all checkouts is included, newest reservation first; a nonmatching phone returns `{ "bookings": [] }`. The response is `{ "bookings": [{ "outletName": "...", "tableName": "...", "startsAt": "<ISO date>", "durationHours": 1, "status": "pending|confirmed|in_progress|completed|cancelled|expired" }] }`. Pending holds past their expiry read as `expired`. No customer contact, booking references, or payment details are returned. This public, phone-only lookup provides weaker privacy than invoice verification; it does not cancel bookings or issue refunds.
 - `GET /bookings` lists persisted booking records with customer contact, outlet, table, time, amount, and status for the internal dashboard. It requires an active owner JWT in `Authorization: Bearer <token>`.
 - `PATCH /bookings/:id/cancel` requires the same owner JWT and a UUID booking ID. After the customer contacts the owner, it returns `{ "id": "<uuid>", "status": "cancelled" }` for a pending booking or a confirmed booking that has not started. Missing bookings return 404; cancelled, expired, completed, in-progress, and already-started confirmed bookings return 409. Repeating the request returns 409.
 
@@ -10,4 +11,4 @@ Provides public booking availability and owner-only booking records and cancella
 
 The public DOKU notification endpoint verifies the DOKU HMAC signature, client ID, timestamp, invoice, and amount before applying a success transition. DOKU `FAILED` notifications are acknowledged but ignored so Checkout customers may retry another payment method. Successful payment notifications are idempotent. If the payment succeeds after the hold was released, the booking was cancelled, or the table was rebooked, payment is recorded as succeeded and the public result page flags the reservation for manual review rather than silently confirming a conflicting booking. Cancellation releases the table by changing only the booking status and hold expiry; it does not cancel the DOKU checkout, update payment/session records, or initiate a refund. The owner handles any payment reconciliation or refund manually outside the application. A pending checkout may therefore still succeed after cancellation.
 
-Public availability and checkout creation do not require dashboard authentication. The internal booking list and cancellation are owner-protected.
+Public availability, checkout creation, and phone-only lookup do not require dashboard authentication. The internal booking list and cancellation are owner-protected.

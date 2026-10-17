@@ -25,6 +25,44 @@ export class BookingsService {
     private readonly outletAccess: OutletAccessService,
   ) {}
 
+  /** Finds public booking details across all checkout sessions for one phone. */
+  async lookupByPhone(phone: string) {
+    const compact = phone.replace(/[\s-]/g, '');
+    const normalized = compact.replace(/^(?:\+62|62)(?=[1-9])/, '0');
+    const bookings: {
+      outletName: string;
+      tableName: string;
+      startsAt: Date;
+      durationHours: number;
+      status: BookingEntity['status'];
+    }[] = await this.bookings.query(
+      `SELECT o.name AS "outletName", t.name AS "tableName",
+         b.starts_at AS "startsAt", b.duration_hours AS "durationHours",
+         CASE WHEN b.status = 'pending' AND b.hold_expires_at <= CURRENT_TIMESTAMP
+              THEN 'expired' ELSE b.status END AS status
+       FROM payment_sessions s
+       JOIN payment_session_bookings psb ON psb.payment_session_id = s.id
+       JOIN bookings b ON b.id = psb.booking_id
+       JOIN outlets o ON o.id = b.outlet_id
+       JOIN mahjong_tables t ON t.id = b.table_id
+       CROSS JOIN LATERAL (
+         SELECT regexp_replace(s.customer_phone, '[[:space:]-]', '', 'g') AS compact
+       ) phone_input
+       WHERE CASE
+         WHEN left(phone_input.compact, 3) = '+62'
+              AND substring(phone_input.compact from 4 for 1) BETWEEN '1' AND '9'
+           THEN '0' || substring(phone_input.compact from 4)
+         WHEN left(phone_input.compact, 2) = '62'
+              AND substring(phone_input.compact from 3 for 1) BETWEEN '1' AND '9'
+           THEN '0' || substring(phone_input.compact from 3)
+         ELSE phone_input.compact
+       END = $1
+       ORDER BY b.starts_at DESC, b.created_at DESC, b.id DESC`,
+      [normalized],
+    );
+    return { bookings };
+  }
+
   /** Lists bookable tables whose active reservation intervals do not overlap. */
   async findAvailable(
     dto: BookingAvailabilityDto,

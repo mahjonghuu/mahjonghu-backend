@@ -25,5 +25,6 @@ import { PaymentsService } from './payments.service.js';
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService, DokuClientService],
+  exports: [PaymentsService],
 })
 export class PaymentsModule {}
