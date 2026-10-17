@@ -106,7 +106,7 @@ describe('CustomerAuthService', () => {
     expect(challenges.query).not.toHaveBeenCalled();
   });
 
-  it('sends a six digit email code while storing only its hash and an expiry', async () => {
+  it('sends the same six digit code in HTML and text while storing only its hash', async () => {
     const { service, challenges, request } = setup();
     const send = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', send);
@@ -117,12 +117,16 @@ describe('CustomerAuthService', () => {
       !payload ||
       typeof payload !== 'object' ||
       !('text' in payload) ||
-      typeof payload.text !== 'string'
+      typeof payload.text !== 'string' ||
+      !('html' in payload) ||
+      typeof payload.html !== 'string'
     ) {
-      throw new Error('Expected email text.');
+      throw new Error('Expected HTML and text email bodies.');
     }
     const code = payload.text.match(/\b\d{6}\b/)?.[0];
     expect(code).toMatch(/^\d{6}$/);
+    expect(payload.html).toContain(`>${code}</span>`);
+    expect(payload.html).not.toContain('member@example.com');
     const [, params] = challenges.query.mock.calls[0] as [string, string[]];
     expect(params[1]).toMatch(/^[a-f0-9]{64}$/);
     expect(params[1]).not.toBe(code);

@@ -12,6 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Request } from 'express';
 import { DataSource, Repository } from 'typeorm';
+import { customerOtpEmail } from './customer-otp-email.js';
 import { UserEntity } from './entities/user.entity.js';
 import { CustomerOtpEntity } from './entities/customer-otp.entity.js';
 import { CustomerOtpIpLimitEntity } from './entities/customer-otp-ip-limit.entity.js';
@@ -113,8 +114,7 @@ export class CustomerAuthService {
         body: JSON.stringify({
           from,
           to: [normalized],
-          subject: 'Kode masuk MahjongHu',
-          text: `Kode masuk MahjongHu Anda: ${code}. Berlaku 10 menit. Jangan berikan kode ini kepada siapa pun.`,
+          ...customerOtpEmail(code),
         }),
       });
       if (!response.ok) throw new Error('Email delivery failed');

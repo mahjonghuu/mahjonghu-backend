@@ -68,6 +68,9 @@ checkouts but does not cancel an existing booking or payment.
 Customer sign-in uses email one-time codes through `POST /auth/customer/request-code`
 and `POST /auth/customer/verify-code`. Configure `RESEND_API_KEY` and a verified
 `EMAIL_FROM` sender for Resend delivery; without them, codes cannot be issued.
+Resend receives a responsive, self-contained HTML email with the six-digit code,
+ten-minute expiry and anti-sharing guidance, plus an equivalent plain-text body
+for mail clients that do not render HTML. No external image or link is required.
 Only active customer addresses with a current owner-issued grant to an active
 outlet receive a code; other addresses see `Email tidak terdaftar.` Customer
 sessions use a separate HttpOnly `customerToken` cookie, never the dashboard
