@@ -50,7 +50,7 @@ VALUES ($1, lower(btrim($2)), $3, 'owner', true);
 Create a separate Vercel project with **Root Directory** set to
 `mahjonghu-backend` (not the repository root). Vercel detects NestJS from
 `src/main.ts`; `vercel.json` builds the app, runs pending TypeORM migrations,
-and only then bundles the function (maximum request duration: 60 seconds).
+and only then bundles the function. Function duration uses the Vercel project default.
 If compilation or migration fails, the deployment fails without replacing
 the currently serving deployment. Do not set an output directory or add an
 `api/` shim.
