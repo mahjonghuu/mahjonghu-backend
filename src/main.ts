@@ -5,7 +5,9 @@ import { AppModule } from './app.module.js';
 import { requestLoggingMiddleware } from './common/request-logging.middleware.js';
 
 async function bootstrap() {
+  console.info('[bootstrap] Starting Nest application');
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  console.info('[bootstrap] Nest application created');
   app.use(requestLoggingMiddleware);
   const config = app.get(ConfigService);
   app.enableCors({
@@ -20,11 +22,16 @@ async function bootstrap() {
     }),
   );
   const port = config.get<number>('PORT', 3001);
+  console.info('[bootstrap] Starting HTTP listener');
   if (process.env.VERCEL) {
     // Vercel routes requests to the recognized Nest entrypoint; do not bind localhost.
     await app.listen(port);
   } else {
     await app.listen(port, '127.0.0.1');
   }
+  console.info('[bootstrap] HTTP listener ready');
 }
-await bootstrap();
+await bootstrap().catch((error: unknown) => {
+  console.error('[bootstrap] Startup failed', error);
+  throw error;
+});
