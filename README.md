@@ -53,6 +53,8 @@ Create a separate Vercel project with **Root Directory** set to
 and only then bundles the function. Function duration uses the Vercel project default.
 The PostgreSQL driver is imported explicitly by `AppModule` so the Vercel
 function bundle includes `pg`; keep it in production dependencies.
+Keep `bootstrap()` non-blocking at module scope: Vercel must finish importing
+the NestJS entrypoint while the application initializes.
 If compilation or migration fails, the deployment fails without replacing
 the currently serving deployment. Do not set an output directory or add an
 `api/` shim.

@@ -31,7 +31,7 @@ async function bootstrap() {
   }
   console.info('[bootstrap] HTTP listener ready');
 }
-await bootstrap().catch((error: unknown) => {
+void bootstrap().catch((error: unknown) => {
   console.error('[bootstrap] Startup failed', error);
   throw error;
 });
