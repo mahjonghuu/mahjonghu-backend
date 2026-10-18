@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import pg from 'pg';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { OutletsModule } from './outlets/outlets.module.js';
@@ -18,6 +19,7 @@ import { DashboardModule } from './dashboard/dashboard.module.js';
       useFactory: (config: ConfigService) => ({
         type: 'postgres' as const,
         url: config.getOrThrow<string>('DATABASE_URL'),
+        driver: pg,
         autoLoadEntities: true,
         synchronize: false,
       }),

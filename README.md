@@ -51,6 +51,8 @@ Create a separate Vercel project with **Root Directory** set to
 `mahjonghu-backend` (not the repository root). Vercel detects NestJS from
 `src/main.ts`; `vercel.json` builds the app, runs pending TypeORM migrations,
 and only then bundles the function. Function duration uses the Vercel project default.
+The PostgreSQL driver is imported explicitly by `AppModule` so the Vercel
+function bundle includes `pg`; keep it in production dependencies.
 If compilation or migration fails, the deployment fails without replacing
 the currently serving deployment. Do not set an output directory or add an
 `api/` shim.
