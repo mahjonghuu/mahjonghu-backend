@@ -61,10 +61,13 @@ the currently serving deployment. Do not set an output directory or add an
 
 Set the backend environment variables in Vercel Project Settings:
 `DATABASE_URL` (PostgreSQL transaction pooler), `JWT_SECRET`, `WEB_ORIGIN`
-(exact HTTPS origin of the web app), `WEB_PUBLIC_URL` (web app origin), and
-`BACKEND_PUBLIC_URL` (this backend's public origin). Set the DOKU credentials
-for the checkout environments in use, plus `RESEND_API_KEY` and `EMAIL_FROM`
-if customer email login is enabled. Do not upload `.env` to Vercel. Build
+(exact HTTPS origin of the web app), `WEB_PUBLIC_URL` (web app origin),
+`BACKEND_PUBLIC_URL` (this backend's public origin), and `OWNER_COOKIE_DOMAIN`
+(shared parent domain for the web app and API; set `mahjonghuu.com` when the
+dashboard is at `mahjonghuu.com` and the API at `api.mahjonghuu.com`).
+Set the DOKU credentials for the checkout environments in use, plus
+`RESEND_API_KEY` and `EMAIL_FROM` if customer email login is enabled.
+Do not upload `.env` to Vercel. Build
 migrations require a database connection and permission for the existing
 migrations (including `btree_gist`); the `migration:deploy` script consumes
 the already-built `dist` output, so no second build runs.
@@ -83,8 +86,12 @@ Deploy via the Vercel dashboard or from this directory with Vercel CLI
 Use same-site HTTPS domains for the web and API (for example,
 `booking.example.com` and `api.example.com`): owner/customer cookies are
 `SameSite=Strict`, so two unrelated `*.vercel.app` project hosts cannot
-support authenticated browser requests. Configure `NEXT_PUBLIC_API_URL` on
-the frontend to the backend origin and register the deployed DOKU
+support authenticated browser requests. Set `OWNER_COOKIE_DOMAIN=example.com`
+when the dashboard and API use different subdomains: the dashboard proxy must
+receive the owner cookie as well as the API. Without it, successful login
+redirects back to `/dashboard/login`. Leave it unset for a same-host or local
+setup. Configure `NEXT_PUBLIC_API_URL` on the frontend to the backend origin
+and register the deployed DOKU
 notification URLs. Vercel functions do not run continuously; don't rely on
 the in-process expiry timer as a scheduled job. Availability and lookup
 already treat elapsed pending holds as expired, while status checks expire
@@ -92,7 +99,7 @@ overdue payment sessions on access.
 
 ## Authentication and authorization
 
-- `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile. Tokens are not exposed in the JSON response. Invalid credentials and non-owner accounts receive the same `401` response.
+- `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile. Set `OWNER_COOKIE_DOMAIN` to the shared parent domain if the dashboard and API are on separate hosts; logout clears the cookie with the same scope. Tokens are not exposed in the JSON response. Invalid credentials and non-owner accounts receive the same `401` response.
 - `POST /auth/logout` clears the session cookie.
 - `GET /auth/me` validates the JWT cookie or `Authorization: Bearer <token>` (used by the Next.js proxy).
 - `POST /auth/customer/request-code` sends a six-digit single-use code through Resend only when the active customer email has an unexpired grant to an active, non-archived outlet. Emails without eligible outlet access receive `403` with `Email tidak terdaftar.` and no challenge or email is created. `RESEND_API_KEY` and `EMAIL_FROM` are required; codes expire after ten minutes. PostgreSQL enforces per-email cooldown and hourly limits for eligible addresses, per-IP hourly limits for all requests, and five verification attempts.

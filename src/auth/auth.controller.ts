@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Post, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { AuthService } from './auth.service.js';
@@ -15,9 +8,22 @@ function ownerCookieOptions() {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
+    ...(process.env.OWNER_COOKIE_DOMAIN
+      ? { domain: process.env.OWNER_COOKIE_DOMAIN }
+      : {}),
     sameSite: 'strict' as const,
     path: '/',
   };
+}
+
+/** Removes API-host-only sessions issued before cross-subdomain cookies were enabled. */
+function clearLegacyOwnerCookie(response: Response) {
+  if (process.env.OWNER_COOKIE_DOMAIN) {
+    response.clearCookie('ownerToken', {
+      ...ownerCookieOptions(),
+      domain: undefined,
+    });
+  }
 }
 
 @Controller('auth')
@@ -36,6 +42,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ) {
     const result = await this.auth.login(body.email, body.password);
+    clearLegacyOwnerCookie(response);
     response.cookie('ownerToken', result.accessToken, {
       ...ownerCookieOptions(),
       maxAge: 8 * 60 * 60 * 1000,
@@ -46,6 +53,7 @@ export class AuthController {
   @Post('logout')
   logout(@Res({ passthrough: true }) response: Response) {
     response.clearCookie('ownerToken', ownerCookieOptions());
+    clearLegacyOwnerCookie(response);
     return { loggedOut: true };
   }
 }
