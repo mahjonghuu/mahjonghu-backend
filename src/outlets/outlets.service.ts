@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { CreateOutletDto } from './dto/create-outlet.dto.js';
+import type { RateTierDto } from './dto/rate-tier.dto.js';
 import { UpdateOutletDto } from './dto/update-outlet.dto.js';
 import { OutletEntity } from './entities/outlet.entity.js';
 
@@ -16,12 +17,16 @@ type OutletSummary = {
   city: string;
   address: string;
   visibility: 'public' | 'private';
+  rate: number;
+  rateTiers: RateTierDto[];
   active: boolean;
   openingHour: number;
   closingHour: number;
   tableCount: number;
   occupiedTableCount: number;
 };
+
+type OutletDetail = Omit<OutletSummary, 'tableCount' | 'occupiedTableCount'>;
 
 /** Owns outlet validation and persistence for the operational dashboard. */
 @Injectable()
@@ -43,6 +48,7 @@ export class OutletsService {
         o.visibility,
         o.opening_hour AS "openingHour",
         o.closing_hour AS "closingHour",
+        o.hourly_rate_idr AS rate, o.rate_tiers AS "rateTiers",
         (SELECT count(*) FROM mahjong_tables t
           WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
         (SELECT count(DISTINCT b.table_id) FROM bookings b
@@ -58,6 +64,8 @@ export class OutletsService {
       address: String(row.address),
       visibility: row.visibility as 'public' | 'private',
       active: row.active === true,
+      rate: Number(row.rate),
+      rateTiers: row.rateTiers as RateTierDto[],
       openingHour: Number(row.openingHour),
       closingHour: Number(row.closingHour),
       tableCount: Number(row.tableCount),
@@ -73,6 +81,7 @@ export class OutletsService {
         o.id, o.name, o.city, o.address, o.is_active AS active,
         o.visibility,
         o.opening_hour AS "openingHour", o.closing_hour AS "closingHour",
+        o.hourly_rate_idr AS rate, o.rate_tiers AS "rateTiers",
         (SELECT count(*) FROM mahjong_tables t
           WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
         (SELECT count(DISTINCT b.table_id) FROM bookings b
@@ -97,6 +106,8 @@ export class OutletsService {
       active: row.active === true,
       visibility: row.visibility as 'public' | 'private',
       openingHour: Number(row.openingHour),
+      rate: Number(row.rate),
+      rateTiers: row.rateTiers as RateTierDto[],
       closingHour: Number(row.closingHour),
       tableCount: Number(row.tableCount),
       occupiedTableCount: Number(row.occupiedTableCount),
@@ -104,24 +115,28 @@ export class OutletsService {
   }
 
   /** Creates a normalized outlet and maps duplicate active names to HTTP 409. */
-  async create(dto: CreateOutletDto): Promise<OutletEntity> {
+  async create(dto: CreateOutletDto): Promise<OutletDetail> {
     const outlet = this.outlets.create({
       name: this.requiredText(dto.name, 'name'),
       city: this.requiredText(dto.city, 'city'),
       address: this.requiredText(dto.address, 'address'),
+      hourlyRateIdr: String(dto.rate),
+      rateTiers: dto.rateTiers ?? [],
       visibility: dto.visibility ?? 'public',
       isActive: dto.active ?? true,
       openingHour: dto.openingHour ?? 12,
       closingHour: dto.closingHour ?? 22,
     });
     if (outlet.closingHour === outlet.openingHour) {
-      throw new BadRequestException('Jam tutup tidak boleh sama dengan jam buka.');
+      throw new BadRequestException(
+        'Jam tutup tidak boleh sama dengan jam buka.',
+      );
     }
-    return this.saveWithConflict(outlet);
+    return this.toDetail(await this.saveWithConflict(outlet));
   }
 
   /** Updates outlet details; in-use bookings prevent deactivation. */
-  async update(id: string, dto: UpdateOutletDto): Promise<OutletEntity> {
+  async update(id: string, dto: UpdateOutletDto): Promise<OutletDetail> {
     const outlet = await this.findOne(id);
     if (dto.name !== undefined)
       outlet.name = this.requiredText(dto.name, 'name');
@@ -129,6 +144,8 @@ export class OutletsService {
       outlet.city = this.requiredText(dto.city, 'city');
     if (dto.address !== undefined)
       outlet.address = this.requiredText(dto.address, 'address');
+    if (dto.rate !== undefined) outlet.hourlyRateIdr = String(dto.rate);
+    if (dto.rateTiers !== undefined) outlet.rateTiers = dto.rateTiers;
     if (
       dto.active === false &&
       outlet.isActive &&
@@ -143,9 +160,11 @@ export class OutletsService {
     if (dto.openingHour !== undefined) outlet.openingHour = dto.openingHour;
     if (dto.closingHour !== undefined) outlet.closingHour = dto.closingHour;
     if (outlet.closingHour === outlet.openingHour) {
-      throw new BadRequestException('Jam tutup tidak boleh sama dengan jam buka.');
+      throw new BadRequestException(
+        'Jam tutup tidak boleh sama dengan jam buka.',
+      );
     }
-    return this.saveWithConflict(outlet);
+    return this.toDetail(await this.saveWithConflict(outlet));
   }
 
   /** Archives an outlet only when it has no tables or booking history. */
@@ -190,6 +209,21 @@ export class OutletsService {
       [outletId],
     )) as [{ occupied: boolean }];
     return occupied;
+  }
+
+  private toDetail(outlet: OutletEntity): OutletDetail {
+    return {
+      id: outlet.id,
+      name: outlet.name,
+      city: outlet.city,
+      address: outlet.address,
+      visibility: outlet.visibility,
+      active: outlet.isActive,
+      openingHour: outlet.openingHour,
+      closingHour: outlet.closingHour,
+      rate: Number(outlet.hourlyRateIdr),
+      rateTiers: outlet.rateTiers,
+    };
   }
 
   private async saveWithConflict(outlet: OutletEntity): Promise<OutletEntity> {

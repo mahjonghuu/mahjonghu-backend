@@ -53,19 +53,22 @@ describe('PaymentsService', () => {
       setLock: vi.fn().mockReturnThis(),
       getMany: vi
         .fn()
-        .mockResolvedValue([{ id: tableId, outletId, hourlyRateIdr: '75000' }]),
+        .mockResolvedValue([{ id: tableId, outletId }]),
     };
     const tablesRepository = { createQueryBuilder: vi.fn(() => tableQuery) };
+    const outletRepository = {
+      findOne: vi.fn().mockResolvedValue({
+        id: outletId,
+        timezone: 'Asia/Jakarta',
+        hourlyRateIdr: '100000',
+        rateTiers: [{ durationHours: 2, rate: 80000 }],
+      }),
+    };
     const manager = {
       getRepository: vi.fn((entity) => {
         if (entity === PaymentSessionEntity) return sessionRepository;
         if (entity === TableEntity) return tablesRepository;
-        if (entity === OutletEntity)
-          return {
-            findOne: vi
-              .fn()
-              .mockResolvedValue({ id: outletId, timezone: 'Asia/Jakarta' }),
-          };
+        if (entity === OutletEntity) return outletRepository;
         throw new Error('Unexpected repository');
       }),
       query: vi.fn(async (sql: string, parameters: unknown[] = []) => {
@@ -73,6 +76,7 @@ describe('PaymentsService', () => {
           for (let index = 0; index < parameters.length / 13; index += 1) {
             bookingRows.push({
               reference: parameters[index * 13],
+              hourlyRateIdr: parameters[index * 13 + 9],
               totalAmountIdr: parameters[index * 13 + 10],
               holdExpiresAt: parameters[index * 13 + 12],
             });
@@ -123,7 +127,7 @@ describe('PaymentsService', () => {
       customerEmail: 'ADA@example.com',
       sessions: [
         { tableId, startsAt, durationHours: 1 },
-        { tableId, startsAt: '2026-10-13T06:00:00.000Z', durationHours: 1 },
+        { tableId, startsAt: '2026-10-14T05:00:00.000Z', durationHours: 3 },
       ],
     };
 
@@ -134,13 +138,14 @@ describe('PaymentsService', () => {
     );
     expect(doku.createCheckout).toHaveBeenCalledWith(
       'dev',
-      expect.objectContaining({ amount: 150_000 }),
+      expect.objectContaining({ amount: 340_000 }),
     );
     expect(bookingRows).toHaveLength(2);
-    expect(bookingRows.map((row) => row.totalAmountIdr)).toEqual([
-      '75000',
-      '75000',
+    expect(bookingRows.map((row) => [row.hourlyRateIdr, row.totalAmountIdr])).toEqual([
+      ['100000', '100000'],
+      ['80000', '240000'],
     ]);
+    expect(paymentRows.map((row) => row.amountIdr)).toEqual(['100000', '240000']);
     expect(
       bookingRows.every(
         (row) => row.holdExpiresAt.getTime() === providerExpiry.getTime(),
@@ -169,6 +174,9 @@ describe('PaymentsService', () => {
       ),
     ).toHaveLength(1);
     expect(tablesRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
+    expect(outletRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ lock: { mode: 'pessimistic_read' } }),
+    );
     expect(tableQuery.setLock).toHaveBeenCalledWith('pessimistic_write');
     expect(tableQuery.orderBy).toHaveBeenCalledWith('table.id', 'ASC');
   });

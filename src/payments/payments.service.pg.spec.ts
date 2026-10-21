@@ -7,6 +7,8 @@ import { BookingEntity } from '../bookings/entities/booking.entity.js';
 import { BookingsService } from '../bookings/bookings.service.js';
 import { InitialSchema1791590400000 } from '../database/migrations/1791590400000-InitialSchema.js';
 import { AddDokuPaymentSessions1791763200000 } from '../database/migrations/1791763200000-AddDokuPaymentSessions.js';
+import { AddOutletOperatingHours1791849600000 } from '../database/migrations/1791849600000-AddOutletOperatingHours.js';
+import { MovePricingToOutlets1792108800000 } from '../database/migrations/1792108800000-MovePricingToOutlets.js';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 import type { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
@@ -42,6 +44,8 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
       migrations: [
         InitialSchema1791590400000,
         AddDokuPaymentSessions1791763200000,
+        AddOutletOperatingHours1791849600000,
+        MovePricingToOutlets1792108800000,
       ],
     });
     await dataSource.initialize();
@@ -67,8 +71,8 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
 
     for (let index = 0; index < 3; index += 1) {
       const table = (await dataSource.query(
-        `INSERT INTO mahjong_tables (outlet_id, name, hourly_rate_idr)
-         VALUES ($1, $2, 75000) RETURNING id`,
+        `INSERT INTO mahjong_tables (outlet_id, name)
+         VALUES ($1, $2) RETURNING id`,
         [outlet[0].id, `Table ${index}`],
       )) as { id: string }[];
       const session = (await dataSource.query(
@@ -197,8 +201,8 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
        VALUES ('Cancellation outlet', 'Jakarta', 'Test street') RETURNING id`,
     )) as { id: string }[];
     const table = (await dataSource.query(
-      `INSERT INTO mahjong_tables (outlet_id, name, hourly_rate_idr)
-       VALUES ($1, 'Cancellation table', 75000) RETURNING id`,
+      `INSERT INTO mahjong_tables (outlet_id, name)
+       VALUES ($1, 'Cancellation table') RETURNING id`,
       [outlet[0].id],
     )) as { id: string }[];
     const expiresAt = new Date(Date.now() + 10 * 60_000);
@@ -319,8 +323,8 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
        VALUES ('Confirmed outlet', 'Jakarta', 'Test street') RETURNING id`,
     )) as { id: string }[];
     const table = (await dataSource.query(
-      `INSERT INTO mahjong_tables (outlet_id, name, hourly_rate_idr)
-       VALUES ($1, 'Confirmed table', 75000) RETURNING id`,
+      `INSERT INTO mahjong_tables (outlet_id, name)
+       VALUES ($1, 'Confirmed table') RETURNING id`,
       [outlet[0].id],
     )) as { id: string }[];
     const startsAt = new Date(Date.now() + 86_400_000);
@@ -391,13 +395,175 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
     );
   });
 
-  it('waits for a table update and prices checkout from the locked row', async () => {
+  it('snapshots the latest effective hourly tier per booking and charges DOKU the sum', async () => {
+    const outlet = (await dataSource.query(
+      `INSERT INTO outlets (name, city, address, hourly_rate_idr)
+       VALUES ('Tier outlet', 'Jakarta', 'Test street', 100000) RETURNING id`,
+    )) as { id: string }[];
+    const table = (await dataSource.query(
+      `INSERT INTO mahjong_tables (outlet_id, name)
+       VALUES ($1, 'Tier table') RETURNING id`,
+      [outlet[0].id],
+    )) as { id: string }[];
+    const secondTable = (await dataSource.query(
+      `INSERT INTO mahjong_tables (outlet_id, name)
+       VALUES ($1, 'Other tier table') RETURNING id`,
+      [outlet[0].id],
+    )) as { id: string }[];
+    const independentOutlet = (await dataSource.query(
+      `INSERT INTO outlets (name, city, address, hourly_rate_idr)
+       VALUES ('Independent outlet', 'Jakarta', 'Other street', 95000) RETURNING id`,
+    )) as { id: string }[];
+    await dataSource.query(
+      `UPDATE outlets SET rate_tiers = $2::jsonb WHERE id = $1`,
+      [
+        outlet[0].id,
+        JSON.stringify([
+          { durationHours: 2, rate: 80000 },
+          { durationHours: 5, rate: 70000 },
+        ]),
+      ],
+    );
+    const doku = {
+      createCheckout: vi.fn().mockResolvedValue({
+        checkoutUrl: 'https://checkout.example.com/tier-order',
+        dokuSessionId: 'doku-tier-test',
+        expiresAt: new Date(Date.now() + 15 * 60_000),
+      }),
+    };
+    const service = new PaymentsService(
+      dataSource.getRepository(PaymentSessionEntity),
+      dataSource,
+      doku as unknown as DokuClientService,
+      {
+        allowed: vi.fn().mockResolvedValue(true),
+      } as unknown as OutletAccessService,
+      {
+        get: vi.fn((_key: string, fallback?: string) => fallback),
+      } as unknown as ConfigService,
+    );
+    const start = new Date(Date.now() + 2 * 86_400_000);
+    start.setUTCHours(5, 0, 0, 0);
+    const checkout = await service.createCheckout('dev', {
+      outletId: outlet[0].id,
+      customerName: 'Guest',
+      customerPhone: '081234567890',
+      customerEmail: 'guest@example.com',
+      sessions: [1, 2, 3, 4, 5].map((durationHours, index) => ({
+        tableId: index < 3 ? table[0].id : secondTable[0].id,
+        startsAt: new Date(start.getTime() + index * 86_400_000).toISOString(),
+        durationHours,
+      })),
+    });
+    expect(doku.createCheckout).toHaveBeenCalledWith(
+      'dev',
+      expect.objectContaining({ amount: 1_170_000 }),
+    );
+    const amounts = (await dataSource.query(
+      `SELECT b.duration_hours AS "durationHours",
+         b.hourly_rate_idr AS "hourlyRateIdr", b.total_amount_idr AS "totalAmountIdr",
+         p.amount_idr AS "paymentAmountIdr"
+       FROM bookings b JOIN payments p ON p.booking_id = b.id
+       JOIN payment_sessions s ON s.id = p.payment_session_id
+       WHERE s.invoice_number = $1 ORDER BY b.duration_hours`,
+      [checkout.reference],
+    )) as {
+      durationHours: number;
+      hourlyRateIdr: string;
+      totalAmountIdr: string;
+      paymentAmountIdr: string;
+    }[];
+    expect(amounts).toEqual([
+      {
+        durationHours: 1,
+        hourlyRateIdr: '100000',
+        totalAmountIdr: '100000',
+        paymentAmountIdr: '100000',
+      },
+      {
+        durationHours: 2,
+        hourlyRateIdr: '80000',
+        totalAmountIdr: '160000',
+        paymentAmountIdr: '160000',
+      },
+      {
+        durationHours: 3,
+        hourlyRateIdr: '80000',
+        totalAmountIdr: '240000',
+        paymentAmountIdr: '240000',
+      },
+      {
+        durationHours: 4,
+        hourlyRateIdr: '80000',
+        totalAmountIdr: '320000',
+        paymentAmountIdr: '320000',
+      },
+      {
+        durationHours: 5,
+        hourlyRateIdr: '70000',
+        totalAmountIdr: '350000',
+        paymentAmountIdr: '350000',
+      },
+    ]);
+    await dataSource.query(
+      `UPDATE outlets SET hourly_rate_idr = 150000, rate_tiers = '[]'::jsonb WHERE id = $1`,
+      [outlet[0].id],
+    );
+    const snapshots = (await dataSource.query(
+      `SELECT hourly_rate_idr AS "hourlyRateIdr", total_amount_idr AS "totalAmountIdr"
+       FROM bookings WHERE outlet_id = $1 AND table_id IN ($2, $3) ORDER BY duration_hours`,
+      [outlet[0].id, table[0].id, secondTable[0].id],
+    )) as { hourlyRateIdr: string; totalAmountIdr: string }[];
+    expect(snapshots).toEqual(
+      amounts.map(({ hourlyRateIdr, totalAmountIdr }) => ({
+        hourlyRateIdr,
+        totalAmountIdr,
+      })),
+    );
+    const independentRate = (await dataSource.query(
+      `SELECT hourly_rate_idr FROM outlets WHERE id = $1`,
+      [independentOutlet[0].id],
+    )) as { hourly_rate_idr: string }[];
+    expect(independentRate[0].hourly_rate_idr).toBe('95000');
+    const repriced = await service.createCheckout('dev', {
+      outletId: outlet[0].id,
+      customerName: 'Guest',
+      customerPhone: '081234567890',
+      customerEmail: 'guest@example.com',
+      sessions: [
+        {
+          tableId: table[0].id,
+          startsAt: new Date(start.getTime() + 10 * 86_400_000).toISOString(),
+          durationHours: 1,
+        },
+        {
+          tableId: secondTable[0].id,
+          startsAt: new Date(start.getTime() + 10 * 86_400_000).toISOString(),
+          durationHours: 2,
+        },
+      ],
+    });
+    const repricedRates = (await dataSource.query(
+      `SELECT b.hourly_rate_idr AS "rate" FROM bookings b
+       JOIN payment_session_bookings sb ON sb.booking_id = b.id
+       JOIN payment_sessions s ON s.id = sb.payment_session_id
+       WHERE s.invoice_number = $1 ORDER BY b.duration_hours`,
+      [repriced.reference],
+    )) as { rate: string }[];
+    expect(repricedRates).toEqual([{ rate: '150000' }, { rate: '150000' }]);
+    expect(doku.createCheckout).toHaveBeenLastCalledWith(
+      'dev',
+      expect.objectContaining({ amount: 450_000 }),
+    );
+  });
+
+  it('waits for a tier update and prices checkout from the locked row', async () => {
     const outlet = (await dataSource.query(
       `INSERT INTO outlets (name, city, address) VALUES ('Checkout outlet', 'Jakarta', 'Test street') RETURNING id`,
     )) as { id: string }[];
     const table = (await dataSource.query(
-      `INSERT INTO mahjong_tables (outlet_id, name, hourly_rate_idr)
-       VALUES ($1, 'Checkout table', 75000) RETURNING id`,
+      `INSERT INTO mahjong_tables (outlet_id, name)
+       VALUES ($1, 'Checkout table') RETURNING id`,
       [outlet[0].id],
     )) as { id: string }[];
     const updater = dataSource.createQueryRunner();
@@ -405,8 +571,9 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
     await updater.startTransaction();
     try {
       await updater.query(
-        `UPDATE mahjong_tables SET hourly_rate_idr = 90000 WHERE id = $1`,
-        [table[0].id],
+        `UPDATE outlets SET hourly_rate_idr = 90000,
+         rate_tiers = '[{"durationHours":2,"rate":80000}]'::jsonb WHERE id = $1`,
+        [outlet[0].id],
       );
       const doku = {
         createCheckout: vi.fn().mockResolvedValue({
@@ -438,7 +605,7 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
           {
             tableId: table[0].id,
             startsAt: startsAt.toISOString(),
-            durationHours: 1,
+            durationHours: 2,
           },
         ],
       });
@@ -448,8 +615,8 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
           `SELECT EXISTS (
              SELECT 1 FROM pg_stat_activity
              WHERE wait_event_type = 'Lock'
-               AND query ILIKE '%mahjong_tables%'
-               AND query ILIKE '%FOR UPDATE%'
+               AND query ILIKE '%outlets%'
+               AND query ILIKE '%FOR SHARE%'
            ) AS waiting`,
         )) as { waiting: boolean }[];
         waiting = activity[0].waiting;
@@ -461,7 +628,7 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
       expect(result.checkoutUrl).toBe('https://checkout.example.com/order');
       expect(doku.createCheckout).toHaveBeenCalledWith(
         'dev',
-        expect.objectContaining({ amount: 90_000 }),
+        expect.objectContaining({ amount: 160_000 }),
       );
     } finally {
       if (updater.isTransactionActive) await updater.rollbackTransaction();

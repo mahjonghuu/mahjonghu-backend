@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { InitialSchema1791590400000 } from '../database/migrations/1791590400000-InitialSchema.js';
 import { AddDokuPaymentSessions1791763200000 } from '../database/migrations/1791763200000-AddDokuPaymentSessions.js';
+import { MovePricingToOutlets1792108800000 } from '../database/migrations/1792108800000-MovePricingToOutlets.js';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 import type { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
@@ -37,6 +38,7 @@ describe.skipIf(!databaseUrl)('BookingsService PostgreSQL phone lookup', () => {
       migrations: [
         InitialSchema1791590400000,
         AddDokuPaymentSessions1791763200000,
+        MovePricingToOutlets1792108800000,
       ],
     });
     await dataSource.initialize();
@@ -57,8 +59,8 @@ describe.skipIf(!databaseUrl)('BookingsService PostgreSQL phone lookup', () => {
        VALUES ('Jakarta outlet', 'Jakarta', 'Test street') RETURNING id`,
     )) as { id: string }[];
     const table = (await dataSource.query(
-      `INSERT INTO mahjong_tables (outlet_id, name, hourly_rate_idr)
-       VALUES ($1, 'Blue table', 75000) RETURNING id`,
+      `INSERT INTO mahjong_tables (outlet_id, name)
+       VALUES ($1, 'Blue table') RETURNING id`,
       [outlet[0].id],
     )) as { id: string }[];
     const futureHold = new Date(Date.now() + 60_000);

@@ -18,6 +18,19 @@ npm run migration:show
 npm run migration:run
 ```
 
+The single outlet-pricing migration moves each existing per-table hourly rate to its outlet and creates empty outlet-level duration tiers. It refuses to run if tables within the same outlet have different base rates, rather than silently repricing bookings. Before deployment, inspect and reconcile any such outlets in the target database, back it up, then apply migrations. Outlets with no tables start with a Rp75,000 one-hour rate. Previously persisted bookings keep their original rates and totals.
+
+Identify outlets that need reconciliation with a read-only query against the pre-migration schema:
+
+```sql
+SELECT outlet_id, COUNT(DISTINCT hourly_rate_idr) AS distinct_prices
+FROM mahjong_tables
+GROUP BY outlet_id
+HAVING COUNT(DISTINCT hourly_rate_idr) > 1;
+```
+
+Set one intended hourly rate for every table in each returned outlet before applying the outlet-pricing migration. This is a one-time data reconciliation; subsequent pricing edits and duration tiers are managed only on the outlet.
+
 The DOKU payment migration creates payment sessions and links one aggregate checkout to its held bookings. Configure separate credentials:
 
 - Sandbox: `DOKU_DEV_CLIENT_ID`, `DOKU_DEV_SECRET_KEY`
@@ -136,8 +149,8 @@ guest checkout. Backend checkout rechecks access before creating any hold.
 
 ## API and operation
 
-- `GET /outlets` lists non-archived outlets. `POST /outlets`, `PATCH /outlets/:id`, and `DELETE /outlets/:id` manage outlets; archival is rejected if tables or booking history reference them.
-- `GET /tables` lists non-archived tables with booking-derived occupancy. `POST /tables`, `PATCH /tables/:id`, and `DELETE /tables/:id` manage tables; occupancy cannot be set manually.
+- `GET /outlets` lists non-archived outlets. `POST /outlets`, `PATCH /outlets/:id`, and `DELETE /outlets/:id` manage outlets; archival is rejected if tables or booking history reference them. Each outlet has a one-hour `rate` and optional `rateTiers` of `{ durationHours, rate }` thresholds (2–10 hours). A session uses the hourly rate at its greatest eligible threshold for its entire duration, carrying the last rate forward when no exact threshold is configured. Checkout prices sessions on the server and preserves the applied rate on historical bookings.
+- `GET /tables` lists non-archived tables with booking-derived occupancy. `POST /tables`, `PATCH /tables/:id`, and `DELETE /tables/:id` manage tables; occupancy cannot be set manually. All tables in an outlet use its shared rate schedule; table routes do not accept prices.
 - `GET /bookings/availability` provides public slot discovery. All guest reservations are created together with a DOKU payment session through the checkout endpoints above; standalone unpaid `POST /bookings` is not exposed.
 - Opening and closing hours are configured per outlet in whole hours (default 12:00–22:00); public discovery returns them, and checkout rejects sessions outside those hours. A closing hour earlier than opening (for example, 13:00–04:00) closes on the next calendar day; `closingHour: 0` means next-day midnight when opening is later, while `closingHour: 24` means same-day midnight. Equal opening and closing hours are invalid. Apply pending migrations before accepting overnight outlet updates so the database constraint matches the API.
 - `POST /payments/doku/dev/checkout` creates one sandbox DOKU Checkout for all selected table sessions; `/prod/checkout` uses the separate production credentials. Each server-created booking hold and the DOKU checkout deadline use the provider's 15-minute expiry.

@@ -15,7 +15,6 @@ type TableRecord = {
   id: string;
   outletId: string;
   name: string;
-  rate: number;
   status: TableStatus;
 };
 
@@ -33,7 +32,7 @@ export class TablesService {
   async findAll(): Promise<TableRecord[]> {
     const rows = await this.tables.query(`
       SELECT t.id, t.outlet_id AS "outletId", t.name,
-        t.hourly_rate_idr AS rate, t.condition,
+        t.condition,
         EXISTS (
           SELECT 1 FROM bookings b
           WHERE b.table_id = t.id AND b.outlet_id = t.outlet_id
@@ -52,7 +51,7 @@ export class TablesService {
     const rows = await this.tables.query(
       `
       SELECT t.id, t.outlet_id AS "outletId", t.name,
-        t.hourly_rate_idr AS rate, t.condition,
+        t.condition,
         EXISTS (
           SELECT 1 FROM bookings b
           WHERE b.table_id = t.id AND b.outlet_id = t.outlet_id
@@ -90,14 +89,13 @@ export class TablesService {
     const table = this.tables.create({
       outletId: outlet.id,
       name: this.requiredText(dto.name),
-      hourlyRateIdr: String(dto.rate),
       condition: dto.status === 'Perawatan' ? 'maintenance' : 'available',
       archivedAt: null,
     });
     return this.saveWithConflict(table);
   }
 
-  /** Updates a table's name, rate, and non-occupancy condition. */
+  /** Updates a table's name and non-occupancy condition. */
   async update(id: string, dto: UpdateTableDto): Promise<TableRecord> {
     const table = await this.findOne(id);
     if (dto.status !== undefined && (await this.isOccupied(id))) {
@@ -106,7 +104,6 @@ export class TablesService {
       );
     }
     if (dto.name !== undefined) table.name = this.requiredText(dto.name);
-    if (dto.rate !== undefined) table.hourlyRateIdr = String(dto.rate);
     if (dto.status !== undefined)
       table.condition =
         dto.status === 'Perawatan' ? 'maintenance' : 'available';
@@ -153,7 +150,6 @@ export class TablesService {
       id: String(row.id),
       outletId: String(row.outletId),
       name: String(row.name),
-      rate: Number(row.rate),
       status:
         row.occupied === true
           ? 'Digunakan'
@@ -170,7 +166,6 @@ export class TablesService {
         id: saved.id,
         outletId: saved.outletId,
         name: saved.name,
-        rate: Number(saved.hourlyRateIdr),
         status: saved.condition === 'maintenance' ? 'Perawatan' : 'Tersedia',
       };
     } catch (cause) {

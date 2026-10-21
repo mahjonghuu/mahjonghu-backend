@@ -9,6 +9,7 @@ describe('outlet operating hours DTOs', () => {
         name: 'Night outlet',
         city: 'Jakarta',
         address: 'Jalan Menteng',
+        rate: 75000,
         openingHour: 13,
         closingHour,
       });
@@ -25,6 +26,7 @@ describe('outlet operating hours DTOs', () => {
       name: 'Night outlet',
       city: 'Jakarta',
       address: 'Jalan Menteng',
+      rate: 75000,
       openingHour: 24,
       closingHour: 25,
     });

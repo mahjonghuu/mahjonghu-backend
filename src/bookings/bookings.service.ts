@@ -97,7 +97,6 @@ export class BookingsService {
       )
       .select('table.id', 'tableId')
       .addSelect('table.name', 'tableName')
-      .addSelect('table.hourlyRateIdr', 'hourlyRateIdr')
       .where('table.outletId = :outletId', { outletId: dto.outletId })
       .andWhere('table.archivedAt IS NULL')
       .andWhere("table.condition = 'available'")
@@ -107,7 +106,6 @@ export class BookingsService {
       .getRawMany<{
         tableId: string;
         tableName: string;
-        hourlyRateIdr: string;
       }>();
   }
 

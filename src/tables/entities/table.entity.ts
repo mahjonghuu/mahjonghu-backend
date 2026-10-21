@@ -18,9 +18,6 @@ export class TableEntity {
   @Column({ type: 'varchar', length: 80 })
   name!: string;
 
-  @Column({ name: 'hourly_rate_idr', type: 'bigint' })
-  hourlyRateIdr!: string;
-
   @Column({ type: 'varchar', length: 20, default: 'available' })
   condition!: 'available' | 'maintenance';
 

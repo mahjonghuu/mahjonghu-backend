@@ -5,6 +5,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { RateTierDto } from '../dto/rate-tier.dto.js';
 
 /** Persisted outlet location and operational status. */
 @Entity({ name: 'outlets' })
@@ -23,6 +24,12 @@ export class OutletEntity {
 
   @Column({ type: 'varchar', length: 64, default: 'Asia/Jakarta' })
   timezone!: string;
+
+  @Column({ name: 'hourly_rate_idr', type: 'bigint', default: 75000 })
+  hourlyRateIdr!: string;
+
+  @Column({ name: 'rate_tiers', type: 'jsonb', default: () => "'[]'::jsonb" })
+  rateTiers!: RateTierDto[];
 
   @Column({ name: 'opening_hour', type: 'smallint', default: 12 })
   openingHour!: number;

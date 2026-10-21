@@ -84,6 +84,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
         const sessionRepository = manager.getRepository(PaymentSessionEntity);
         const outlet = await outletRepository.findOne({
           where: { id: dto.outletId, isActive: true, archivedAt: IsNull() },
+          lock: { mode: 'pessimistic_read' },
         });
         if (!outlet) throw new NotFoundException('Outlet tidak ditemukan.');
         if (!(await this.outletAccess.allowed(outlet.id, userId))) {
@@ -196,8 +197,13 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
         const bookingRows = dto.sessions.map((requested) => {
           const table = tableById.get(requested.tableId)!;
           const startsAt = new Date(requested.startsAt);
+          let hourlyRateIdr = outlet.hourlyRateIdr;
+          for (const tier of outlet.rateTiers) {
+            if (tier.durationHours > requested.durationHours) break;
+            hourlyRateIdr = String(tier.rate);
+          }
           const amount =
-            BigInt(table.hourlyRateIdr) * BigInt(requested.durationHours);
+            BigInt(hourlyRateIdr) * BigInt(requested.durationHours);
           totalAmount += amount;
           return {
             reference: `MH${randomUUID().replaceAll('-', '').toUpperCase()}`,
@@ -211,7 +217,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
               startsAt.getTime() + requested.durationHours * 3_600_000,
             ),
             durationHours: requested.durationHours,
-            hourlyRateIdr: table.hourlyRateIdr,
+            hourlyRateIdr,
             totalAmountIdr: amount.toString(),
             status: 'pending',
             holdExpiresAt: expiresAt,

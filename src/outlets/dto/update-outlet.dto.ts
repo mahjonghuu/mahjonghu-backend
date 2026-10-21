@@ -1,4 +1,7 @@
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -8,7 +11,10 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+import { IsAscendingRateTiers, RateTierDto } from './rate-tier.dto.js';
 
 /** Optional fields accepted when updating an outlet. */
 export class UpdateOutletDto {
@@ -29,6 +35,20 @@ export class UpdateOutletDto {
   @MinLength(1)
   @MaxLength(240)
   address?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000_000)
+  rate?: number;
+
+  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(9)
+  @ValidateNested({ each: true })
+  @Type(() => RateTierDto)
+  @IsAscendingRateTiers()
+  rateTiers?: RateTierDto[];
 
   @IsOptional()
   @IsBoolean()
