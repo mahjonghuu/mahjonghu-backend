@@ -7,6 +7,7 @@ import { InitialSchema1791590400000 } from './migrations/1791590400000-InitialSc
 import { AddPasswordHashToUsers1791676800000 } from './migrations/1791676800000-AddPasswordHashToUsers.js';
 import { AddOutletOperatingHours1791849600000 } from './migrations/1791849600000-AddOutletOperatingHours.js';
 import { AddPrivateOutletAccess1791936000000 } from './migrations/1791936000000-AddPrivateOutletAccess.js';
+import { AllowOvernightOutletHours1792022400000 } from './migrations/1792022400000-AllowOvernightOutletHours.js';
 
 // TypeORM CLI does not bootstrap Nest, so initialize Nest ConfigModule explicitly before the DataSource.
 await ConfigModule.forRoot({
@@ -26,5 +27,6 @@ export default new DataSource({
     AddDokuPaymentSessions1791763200000,
     AddOutletOperatingHours1791849600000,
     AddPrivateOutletAccess1791936000000,
+    AllowOvernightOutletHours1792022400000,
   ],
 });

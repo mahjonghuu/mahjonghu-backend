@@ -46,7 +46,7 @@ export class UpdateOutletDto {
 
   @IsOptional()
   @IsInt()
-  @Min(1)
+  @Min(0)
   @Max(24)
   closingHour?: number;
 }

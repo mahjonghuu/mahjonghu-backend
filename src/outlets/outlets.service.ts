@@ -114,8 +114,8 @@ export class OutletsService {
       openingHour: dto.openingHour ?? 12,
       closingHour: dto.closingHour ?? 22,
     });
-    if (outlet.closingHour <= outlet.openingHour) {
-      throw new BadRequestException('Jam tutup harus setelah jam buka.');
+    if (outlet.closingHour === outlet.openingHour) {
+      throw new BadRequestException('Jam tutup tidak boleh sama dengan jam buka.');
     }
     return this.saveWithConflict(outlet);
   }
@@ -142,8 +142,8 @@ export class OutletsService {
     if (dto.visibility !== undefined) outlet.visibility = dto.visibility;
     if (dto.openingHour !== undefined) outlet.openingHour = dto.openingHour;
     if (dto.closingHour !== undefined) outlet.closingHour = dto.closingHour;
-    if (outlet.closingHour <= outlet.openingHour) {
-      throw new BadRequestException('Jam tutup harus setelah jam buka.');
+    if (outlet.closingHour === outlet.openingHour) {
+      throw new BadRequestException('Jam tutup tidak boleh sama dengan jam buka.');
     }
     return this.saveWithConflict(outlet);
   }

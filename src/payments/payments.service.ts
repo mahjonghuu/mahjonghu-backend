@@ -547,17 +547,25 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     closingHour: number,
   ) {
     const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
       hourCycle: 'h23',
     });
+    const overnight = closingHour < openingHour;
+    const localClosingHour = overnight ? closingHour + 24 : closingHour;
     for (const session of dto.sessions) {
       const startsAt = new Date(session.startsAt);
       const parts = formatter.formatToParts(startsAt);
       const localPart = (type: Intl.DateTimeFormatPartTypes) =>
         Number(parts.find((part) => part.type === type)?.value);
       const localHour = localPart('hour');
+      // Morning hours belong to the preceding operating day only when overnight.
+      const localStartHour =
+        overnight && localHour < openingHour
+          ? localHour + 24
+          : localHour;
       if (
         !Number.isFinite(startsAt.getTime()) ||
         startsAt.getTime() <= Date.now() ||
@@ -567,8 +575,8 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
         !Number.isSafeInteger(
           startsAt.getTime() + session.durationHours * 3_600_000,
         ) ||
-        localHour < openingHour ||
-        localHour + session.durationHours > closingHour ||
+        localStartHour < openingHour ||
+        localStartHour + session.durationHours > localClosingHour ||
         localPart('minute') !== 0 ||
         localPart('second') !== 0 ||
         startsAt.getUTCMilliseconds() !== 0

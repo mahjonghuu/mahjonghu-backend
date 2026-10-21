@@ -78,6 +78,60 @@ describe('OutletsService', () => {
     });
   });
 
+  it('accepts overnight and midnight closing hours on create and update', async () => {
+    const { repository, service } = createService();
+    repository.create.mockImplementation(
+      (outlet: Partial<OutletEntity>) => outlet,
+    );
+    repository.save.mockImplementation(async (outlet: OutletEntity) => outlet);
+    repository.findOneBy.mockResolvedValue({
+      id: 'outlet-1',
+      isActive: true,
+      openingHour: 13,
+      closingHour: 22,
+    });
+
+    await expect(
+      service.create({
+        name: 'Night outlet',
+        city: 'Jakarta',
+        address: 'Jalan Menteng',
+        openingHour: 13,
+        closingHour: 4,
+      }),
+    ).resolves.toMatchObject({ openingHour: 13, closingHour: 4 });
+    await expect(
+      service.update('outlet-1', { closingHour: 0 }),
+    ).resolves.toMatchObject({ openingHour: 13, closingHour: 0 });
+  });
+
+  it('rejects equal opening and closing hours on create and update', async () => {
+    const { repository, service } = createService();
+    repository.create.mockImplementation(
+      (outlet: Partial<OutletEntity>) => outlet,
+    );
+    repository.findOneBy.mockResolvedValue({
+      id: 'outlet-1',
+      isActive: true,
+      openingHour: 13,
+      closingHour: 4,
+    });
+
+    await expect(
+      service.create({
+        name: 'Night outlet',
+        city: 'Jakarta',
+        address: 'Jalan Menteng',
+        openingHour: 13,
+        closingHour: 13,
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      service.update('outlet-1', { closingHour: 13 }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
   it('rejects deactivation while an outlet has an in-progress booking', async () => {
     const { repository, service } = createService();
     repository.findOneBy.mockResolvedValue({ id: 'outlet-1', isActive: true });

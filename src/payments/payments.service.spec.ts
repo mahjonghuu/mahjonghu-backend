@@ -173,6 +173,85 @@ describe('PaymentsService', () => {
     expect(tableQuery.orderBy).toHaveBeenCalledWith('table.id', 'ASC');
   });
 
+  it('checks overnight checkout bounds in the outlet timezone before holding tables', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const reachedTableLookup = new Error('Reached table lookup');
+    const getMany = vi.fn().mockRejectedValue(reachedTableLookup);
+    const tableQuery = {
+      where: vi.fn().mockReturnThis(),
+      andWhere: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      setLock: vi.fn().mockReturnThis(),
+      getMany,
+    };
+    const outlet = {
+      id: outletId,
+      timezone: 'Asia/Jakarta',
+      openingHour: 13,
+      closingHour: 4,
+    };
+    const manager = {
+      getRepository: vi.fn((entity) => {
+        if (entity === OutletEntity)
+          return {
+            findOne: vi.fn().mockResolvedValue(outlet),
+          };
+        if (entity === TableEntity)
+          return { createQueryBuilder: vi.fn(() => tableQuery) };
+        return {};
+      }),
+    };
+    const service = createService(
+      {},
+      {
+        transaction: vi.fn((callback) => callback(manager)),
+      } as Partial<DataSource>,
+    );
+    const checkout = (start: string, durationHours: number) =>
+      service.createCheckout('dev', {
+        outletId,
+        customerName: 'Guest',
+        customerPhone: '081234567890',
+        customerEmail: 'guest@example.com',
+        sessions: [{ tableId, startsAt: start, durationHours }],
+      });
+
+    // 02:00–04:00 and 22:00–02:00 local, both on the same operating day.
+    await expect(checkout('2026-10-13T19:00:00.000Z', 2)).rejects.toBe(
+      reachedTableLookup,
+    );
+    await expect(checkout('2026-10-13T15:00:00.000Z', 4)).rejects.toBe(
+      reachedTableLookup,
+    );
+    expect(getMany).toHaveBeenCalledTimes(2);
+
+    // 04:00–05:00, 12:00–13:00, and overrunning the next-day close.
+    await expect(checkout('2026-10-13T21:00:00.000Z', 1)).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(checkout('2026-10-13T05:00:00.000Z', 1)).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(checkout('2026-10-13T20:00:00.000Z', 2)).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(getMany).toHaveBeenCalledTimes(2);
+
+    outlet.closingHour = 0;
+    await expect(checkout('2026-10-13T16:00:00.000Z', 1)).rejects.toBe(
+      reachedTableLookup,
+    );
+    await expect(checkout('2026-10-13T17:00:00.000Z', 1)).rejects.toMatchObject({
+      status: 400,
+    });
+    outlet.closingHour = 24;
+    await expect(checkout('2026-10-13T16:00:00.000Z', 1)).rejects.toBe(
+      reachedTableLookup,
+    );
+    expect(getMany).toHaveBeenCalledTimes(4);
+  });
+
   it('rejects a private checkout before creating a booking hold', async () => {
     const query = vi.fn();
     const manager = {
