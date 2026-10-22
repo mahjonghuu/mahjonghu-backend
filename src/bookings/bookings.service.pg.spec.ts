@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { InitialSchema1791590400000 } from '../database/migrations/1791590400000-InitialSchema.js';
 import { AddDokuPaymentSessions1791763200000 } from '../database/migrations/1791763200000-AddDokuPaymentSessions.js';
 import { MovePricingToOutlets1792108800000 } from '../database/migrations/1792108800000-MovePricingToOutlets.js';
+import { AddHappyHourPricing1792195200000 } from '../database/migrations/1792195200000-AddHappyHourPricing.js';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 import type { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
@@ -39,6 +40,7 @@ describe.skipIf(!databaseUrl)('BookingsService PostgreSQL phone lookup', () => {
         InitialSchema1791590400000,
         AddDokuPaymentSessions1791763200000,
         MovePricingToOutlets1792108800000,
+        AddHappyHourPricing1792195200000,
       ],
     });
     await dataSource.initialize();

@@ -27,6 +27,61 @@ type DokuNotification = {
 };
 
 const HOLD_MILLISECONDS = 15 * 60_000;
+const ISO_DAY: Record<string, number> = {
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
+};
+
+/** Calculates the immutable rate snapshot and amount from the locked outlet configuration. */
+export function bookingPrice(
+  outlet: Pick<
+    OutletEntity,
+    'timezone' | 'hourlyRateIdr' | 'rateTiers' | 'pricingMode' | 'happyHour'
+  >,
+  startsAt: Date,
+  durationHours: number,
+): { hourlyRateIdr: string; amount: bigint } {
+  if (outlet.pricingMode === 'happy_hour' && outlet.happyHour) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: outlet.timezone,
+      weekday: 'short',
+      hour: '2-digit',
+      hourCycle: 'h23',
+    });
+    let firstHourRate = '';
+    let amount = 0n;
+    for (let index = 0; index < durationHours; index += 1) {
+      const parts = formatter.formatToParts(
+        new Date(startsAt.getTime() + index * 3_600_000),
+      );
+      const weekday =
+        ISO_DAY[parts.find((part) => part.type === 'weekday')!.value];
+      const hour = Number(parts.find((part) => part.type === 'hour')!.value);
+      const { days, startHour, endHour, rate } = outlet.happyHour;
+      const appliedRate =
+        days.includes(weekday) && hour >= startHour && hour < endHour
+          ? String(rate)
+          : outlet.hourlyRateIdr;
+      if (index === 0) firstHourRate = appliedRate;
+      amount += BigInt(appliedRate);
+    }
+    return { hourlyRateIdr: firstHourRate, amount };
+  }
+  let hourlyRateIdr = outlet.hourlyRateIdr;
+  for (const tier of outlet.rateTiers) {
+    if (tier.durationHours > durationHours) break;
+    hourlyRateIdr = String(tier.rate);
+  }
+  return {
+    hourlyRateIdr,
+    amount: BigInt(hourlyRateIdr) * BigInt(durationHours),
+  };
+}
 
 /** Owns multi-table holds, DOKU Checkout sessions, and verified payment transitions. */
 @Injectable()
@@ -197,13 +252,11 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
         const bookingRows = dto.sessions.map((requested) => {
           const table = tableById.get(requested.tableId)!;
           const startsAt = new Date(requested.startsAt);
-          let hourlyRateIdr = outlet.hourlyRateIdr;
-          for (const tier of outlet.rateTiers) {
-            if (tier.durationHours > requested.durationHours) break;
-            hourlyRateIdr = String(tier.rate);
-          }
-          const amount =
-            BigInt(hourlyRateIdr) * BigInt(requested.durationHours);
+          const { hourlyRateIdr, amount } = bookingPrice(
+            outlet,
+            startsAt,
+            requested.durationHours,
+          );
           totalAmount += amount;
           return {
             reference: `MH${randomUUID().replaceAll('-', '').toUpperCase()}`,
@@ -569,9 +622,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       const localHour = localPart('hour');
       // Morning hours belong to the preceding operating day only when overnight.
       const localStartHour =
-        overnight && localHour < openingHour
-          ? localHour + 24
-          : localHour;
+        overnight && localHour < openingHour ? localHour + 24 : localHour;
       if (
         !Number.isFinite(startsAt.getTime()) ||
         startsAt.getTime() <= Date.now() ||

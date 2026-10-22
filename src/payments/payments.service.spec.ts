@@ -6,7 +6,7 @@ import { TableEntity } from '../tables/entities/table.entity.js';
 import type { CreateDokuCheckoutDto } from './dto/create-doku-checkout.dto.js';
 import { DokuClientService } from './doku-client.service.js';
 import { PaymentSessionEntity } from './entities/payment-session.entity.js';
-import { PaymentsService } from './payments.service.js';
+import { PaymentsService, bookingPrice } from './payments.service.js';
 
 const now = new Date('2026-10-12T08:00:00.000Z');
 const startsAt = '2026-10-13T05:00:00.000Z';
@@ -29,6 +29,55 @@ function createService(
     config as ConfigService,
   );
 }
+
+describe('bookingPrice', () => {
+  const outlet = {
+    timezone: 'Asia/Jakarta',
+    hourlyRateIdr: '100000',
+    rateTiers: [],
+    pricingMode: 'happy_hour',
+    happyHour: { days: [1, 2, 3, 4, 5], startHour: 16, endHour: 19, rate: 60000 },
+  } as OutletEntity;
+  const price = (instant: string, hours: number, configuration = outlet) =>
+    bookingPrice(configuration, new Date(instant), hours);
+
+  it('applies local weekday hours and crosses the 16:00 and 19:00 boundaries per hour', () => {
+    expect(price('2026-10-19T08:00:00Z', 2)).toEqual({
+      hourlyRateIdr: '100000', amount: 160000n,
+    }); // Monday 15:00–17:00
+    expect(price('2026-10-19T09:00:00Z', 4)).toEqual({
+      hourlyRateIdr: '60000', amount: 280000n,
+    }); // Monday 16:00–20:00
+    expect(price('2026-10-19T08:00:00Z', 1)).toEqual({
+      hourlyRateIdr: '100000', amount: 100000n,
+    });
+  });
+
+  it('checks selected weekdays, weekends, and the actual day after midnight', () => {
+    expect(price('2026-10-24T09:00:00Z', 2)).toEqual({
+      hourlyRateIdr: '100000', amount: 200000n,
+    }); // Saturday 16:00
+    expect(price('2026-10-20T09:00:00Z', 2, {
+      ...outlet, happyHour: { days: [1, 6], startHour: 16, endHour: 19, rate: 60000 },
+    })).toEqual({ hourlyRateIdr: '100000', amount: 200000n }); // Tuesday excluded
+    expect(price('2026-10-24T09:00:00Z', 2, {
+      ...outlet, happyHour: { days: [1, 6], startHour: 16, endHour: 19, rate: 60000 },
+    })).toEqual({ hourlyRateIdr: '60000', amount: 120000n }); // Saturday selected
+    expect(price('2026-10-18T17:00:00Z', 2, {
+      ...outlet, happyHour: { days: [1], startHour: 0, endHour: 2, rate: 60000 },
+    })).toEqual({ hourlyRateIdr: '60000', amount: 120000n }); // Monday 00:00 local
+    expect(price('2026-10-18T16:00:00Z', 2, {
+      ...outlet, happyHour: { days: [1], startHour: 0, endHour: 2, rate: 60000 },
+    })).toEqual({ hourlyRateIdr: '100000', amount: 160000n }); // Sunday 23:00 then Monday midnight
+  });
+
+  it('leaves duration tiers unchanged', () => {
+    expect(price('2026-10-19T09:00:00Z', 3, {
+      ...outlet, pricingMode: 'duration',
+      happyHour: null, rateTiers: [{ durationHours: 2, rate: 80000 }],
+    })).toEqual({ hourlyRateIdr: '80000', amount: 240000n });
+  });
+});
 
 describe('PaymentsService', () => {
   afterEach(() => vi.useRealTimers());

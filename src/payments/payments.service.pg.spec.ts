@@ -8,7 +8,10 @@ import { BookingsService } from '../bookings/bookings.service.js';
 import { InitialSchema1791590400000 } from '../database/migrations/1791590400000-InitialSchema.js';
 import { AddDokuPaymentSessions1791763200000 } from '../database/migrations/1791763200000-AddDokuPaymentSessions.js';
 import { AddOutletOperatingHours1791849600000 } from '../database/migrations/1791849600000-AddOutletOperatingHours.js';
+import { AddPrivateOutletAccess1791936000000 } from '../database/migrations/1791936000000-AddPrivateOutletAccess.js';
+import { AllowOvernightOutletHours1792022400000 } from '../database/migrations/1792022400000-AllowOvernightOutletHours.js';
 import { MovePricingToOutlets1792108800000 } from '../database/migrations/1792108800000-MovePricingToOutlets.js';
+import { AddHappyHourPricing1792195200000 } from '../database/migrations/1792195200000-AddHappyHourPricing.js';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 import type { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
@@ -45,7 +48,10 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
         InitialSchema1791590400000,
         AddDokuPaymentSessions1791763200000,
         AddOutletOperatingHours1791849600000,
+        AddPrivateOutletAccess1791936000000,
+        AllowOvernightOutletHours1792022400000,
         MovePricingToOutlets1792108800000,
+        AddHappyHourPricing1792195200000,
       ],
     });
     await dataSource.initialize();
@@ -395,6 +401,95 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
     );
   });
 
+  it('persists mixed happy-hour totals in booking, payment and DOKU snapshots', async () => {
+    const happyHour = { days: [1], startHour: 16, endHour: 18, rate: 60000 };
+    const outlet = (await dataSource.query(
+      `INSERT INTO outlets (name, city, address, hourly_rate_idr, pricing_mode, happy_hour)
+       VALUES ('Happy hour outlet', 'Jakarta', 'Street', 100000, 'happy_hour', $1::jsonb)
+       RETURNING id`, [JSON.stringify(happyHour)],
+    )) as { id: string }[];
+    const table = (await dataSource.query(
+      `INSERT INTO mahjong_tables (outlet_id, name) VALUES ($1, 'Happy table') RETURNING id`,
+      [outlet[0].id],
+    )) as { id: string }[];
+    const doku = {
+      createCheckout: vi.fn().mockResolvedValue({
+        checkoutUrl: 'https://checkout.example.com/happy',
+        dokuSessionId: 'doku-happy',
+        expiresAt: new Date(Date.now() + 15 * 60_000),
+      }),
+    };
+    const service = new PaymentsService(
+      dataSource.getRepository(PaymentSessionEntity), dataSource,
+      doku as unknown as DokuClientService,
+      { allowed: vi.fn().mockResolvedValue(true) } as unknown as OutletAccessService,
+      { get: vi.fn((_key: string, fallback?: string) => fallback) } as unknown as ConfigService,
+    );
+    const checkout = await service.createCheckout('dev', {
+      outletId: outlet[0].id,
+      customerName: 'Guest', customerPhone: '081234567890',
+      customerEmail: 'happy@example.com',
+      sessions: [{ tableId: table[0].id, startsAt: '2030-01-07T08:00:00Z', durationHours: 4 }],
+    });
+    expect(doku.createCheckout).toHaveBeenCalledWith(
+      'dev', expect.objectContaining({ amount: 320000 }),
+    );
+    const snapshot = (await dataSource.query(
+      `SELECT b.hourly_rate_idr AS "hourlyRateIdr", b.total_amount_idr AS "totalAmountIdr",
+              p.amount_idr AS "paymentAmountIdr", s.amount_idr AS "sessionAmountIdr"
+       FROM payment_sessions s JOIN payment_session_bookings psb ON psb.payment_session_id = s.id
+       JOIN bookings b ON b.id = psb.booking_id
+       JOIN payments p ON p.booking_id = b.id
+       WHERE s.invoice_number = $1`, [checkout.reference],
+    )) as { hourlyRateIdr: string; totalAmountIdr: string; paymentAmountIdr: string; sessionAmountIdr: string }[];
+    expect(snapshot).toEqual([{
+      hourlyRateIdr: '100000', totalAmountIdr: '320000',
+      paymentAmountIdr: '320000', sessionAmountIdr: '320000',
+    }]);
+    await dataSource.query(
+      `UPDATE outlets SET pricing_mode = 'duration', happy_hour = NULL, hourly_rate_idr = 200000
+       WHERE id = $1`, [outlet[0].id],
+    );
+    const persisted = (await dataSource.query(
+      `SELECT total_amount_idr AS "totalAmountIdr" FROM bookings WHERE outlet_id = $1`,
+      [outlet[0].id],
+    )) as { totalAmountIdr: string }[];
+    expect(persisted).toEqual([{ totalAmountIdr: '320000' }]);
+  });
+
+  it('enforces exclusive pricing schedules and valid happy-hour windows in PostgreSQL', async () => {
+    const outlet = (await dataSource.query(
+      `INSERT INTO outlets (name, city, address) VALUES ('Pricing constraints', 'Jakarta', 'Street')
+       RETURNING id, pricing_mode AS "pricingMode", happy_hour AS "happyHour"`,
+    )) as { id: string; pricingMode: string; happyHour: unknown }[];
+    expect(outlet[0]).toMatchObject({ pricingMode: 'duration', happyHour: null });
+    const valid = { days: [1, 6], startHour: 16, endHour: 19, rate: 60000 };
+    for (const configuration of [
+      { ...valid, days: [1, 1] }, { ...valid, days: [0] },
+      { ...valid, endHour: 16 }, { ...valid, rate: 0 },
+      { ...valid, rate: 1_000_000_001 },
+    ]) {
+      await expect(dataSource.query(
+        `UPDATE outlets SET pricing_mode = 'happy_hour', happy_hour = $2::jsonb WHERE id = $1`,
+        [outlet[0].id, JSON.stringify(configuration)],
+      )).rejects.toThrow();
+    }
+    await expect(dataSource.query(
+      `UPDATE outlets SET pricing_mode = 'happy_hour' WHERE id = $1`, [outlet[0].id],
+    )).rejects.toThrow();
+    await dataSource.query(
+      `UPDATE outlets SET pricing_mode = 'happy_hour', happy_hour = $2::jsonb WHERE id = $1`,
+      [outlet[0].id, JSON.stringify(valid)],
+    );
+    await expect(dataSource.query(
+      `UPDATE outlets SET rate_tiers = '[{"durationHours":2,"rate":80000}]'::jsonb
+       WHERE id = $1`, [outlet[0].id],
+    )).rejects.toThrow();
+    await expect(dataSource.query(
+      `UPDATE outlets SET pricing_mode = 'duration' WHERE id = $1`, [outlet[0].id],
+    )).rejects.toThrow();
+  });
+
   it('snapshots the latest effective hourly tier per booking and charges DOKU the sum', async () => {
     const outlet = (await dataSource.query(
       `INSERT INTO outlets (name, city, address, hourly_rate_idr)
@@ -616,7 +711,6 @@ describe.skipIf(!databaseUrl)('PaymentsService PostgreSQL transitions', () => {
              SELECT 1 FROM pg_stat_activity
              WHERE wait_event_type = 'Lock'
                AND query ILIKE '%outlets%'
-               AND query ILIKE '%FOR SHARE%'
            ) AS waiting`,
         )) as { waiting: boolean }[];
         waiting = activity[0].waiting;

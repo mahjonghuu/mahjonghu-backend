@@ -14,6 +14,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { HappyHourDto } from './happy-hour.dto.js';
 import { IsAscendingRateTiers, RateTierDto } from './rate-tier.dto.js';
 
 /** Fields accepted when creating an outlet. */
@@ -45,6 +46,15 @@ export class CreateOutletDto {
   @Type(() => RateTierDto)
   @IsAscendingRateTiers()
   rateTiers?: RateTierDto[];
+
+  @IsOptional()
+  @IsIn(['duration', 'happy_hour'])
+  pricingMode?: 'duration' | 'happy_hour';
+
+  @ValidateIf((_dto, value: unknown) => value !== undefined && value !== null)
+  @ValidateNested()
+  @Type(() => HappyHourDto)
+  happyHour?: HappyHourDto | null;
 
   @IsOptional()
   @IsBoolean()

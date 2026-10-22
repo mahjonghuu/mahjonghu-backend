@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import type { RateTierDto } from '../dto/rate-tier.dto.js';
+import type { HappyHourDto } from '../dto/happy-hour.dto.js';
 
 /** Persisted outlet location and operational status. */
 @Entity({ name: 'outlets' })
@@ -30,6 +31,12 @@ export class OutletEntity {
 
   @Column({ name: 'rate_tiers', type: 'jsonb', default: () => "'[]'::jsonb" })
   rateTiers!: RateTierDto[];
+
+  @Column({ name: 'pricing_mode', type: 'varchar', length: 10, default: 'duration' })
+  pricingMode!: 'duration' | 'happy_hour';
+
+  @Column({ name: 'happy_hour', type: 'jsonb', nullable: true })
+  happyHour!: HappyHourDto | null;
 
   @Column({ name: 'opening_hour', type: 'smallint', default: 12 })
   openingHour!: number;

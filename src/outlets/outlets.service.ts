@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { CreateOutletDto } from './dto/create-outlet.dto.js';
 import type { RateTierDto } from './dto/rate-tier.dto.js';
+import type { HappyHourDto } from './dto/happy-hour.dto.js';
 import { UpdateOutletDto } from './dto/update-outlet.dto.js';
 import { OutletEntity } from './entities/outlet.entity.js';
 
@@ -19,6 +20,8 @@ type OutletSummary = {
   visibility: 'public' | 'private';
   rate: number;
   rateTiers: RateTierDto[];
+  pricingMode: 'duration' | 'happy_hour';
+  happyHour: HappyHourDto | null;
   active: boolean;
   openingHour: number;
   closingHour: number;
@@ -49,6 +52,7 @@ export class OutletsService {
         o.opening_hour AS "openingHour",
         o.closing_hour AS "closingHour",
         o.hourly_rate_idr AS rate, o.rate_tiers AS "rateTiers",
+        o.pricing_mode AS "pricingMode", o.happy_hour AS "happyHour",
         (SELECT count(*) FROM mahjong_tables t
           WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
         (SELECT count(DISTINCT b.table_id) FROM bookings b
@@ -66,6 +70,8 @@ export class OutletsService {
       active: row.active === true,
       rate: Number(row.rate),
       rateTiers: row.rateTiers as RateTierDto[],
+      pricingMode: row.pricingMode as 'duration' | 'happy_hour',
+      happyHour: row.happyHour as HappyHourDto | null,
       openingHour: Number(row.openingHour),
       closingHour: Number(row.closingHour),
       tableCount: Number(row.tableCount),
@@ -82,6 +88,7 @@ export class OutletsService {
         o.visibility,
         o.opening_hour AS "openingHour", o.closing_hour AS "closingHour",
         o.hourly_rate_idr AS rate, o.rate_tiers AS "rateTiers",
+        o.pricing_mode AS "pricingMode", o.happy_hour AS "happyHour",
         (SELECT count(*) FROM mahjong_tables t
           WHERE t.outlet_id = o.id AND t.archived_at IS NULL) AS "tableCount",
         (SELECT count(DISTINCT b.table_id) FROM bookings b
@@ -108,6 +115,8 @@ export class OutletsService {
       openingHour: Number(row.openingHour),
       rate: Number(row.rate),
       rateTiers: row.rateTiers as RateTierDto[],
+      pricingMode: row.pricingMode as 'duration' | 'happy_hour',
+      happyHour: row.happyHour as HappyHourDto | null,
       closingHour: Number(row.closingHour),
       tableCount: Number(row.tableCount),
       occupiedTableCount: Number(row.occupiedTableCount),
@@ -116,12 +125,16 @@ export class OutletsService {
 
   /** Creates a normalized outlet and maps duplicate active names to HTTP 409. */
   async create(dto: CreateOutletDto): Promise<OutletDetail> {
+    const pricingMode = dto.pricingMode ?? 'duration';
+    this.validatePricing(pricingMode, dto.rateTiers ?? [], dto.happyHour ?? null);
     const outlet = this.outlets.create({
       name: this.requiredText(dto.name, 'name'),
       city: this.requiredText(dto.city, 'city'),
       address: this.requiredText(dto.address, 'address'),
       hourlyRateIdr: String(dto.rate),
       rateTiers: dto.rateTiers ?? [],
+      pricingMode,
+      happyHour: dto.happyHour ?? null,
       visibility: dto.visibility ?? 'public',
       isActive: dto.active ?? true,
       openingHour: dto.openingHour ?? 12,
@@ -145,7 +158,16 @@ export class OutletsService {
     if (dto.address !== undefined)
       outlet.address = this.requiredText(dto.address, 'address');
     if (dto.rate !== undefined) outlet.hourlyRateIdr = String(dto.rate);
-    if (dto.rateTiers !== undefined) outlet.rateTiers = dto.rateTiers;
+    const pricingMode = dto.pricingMode ?? outlet.pricingMode ?? 'duration';
+    const switching = pricingMode !== (outlet.pricingMode ?? 'duration');
+    const rateTiers = dto.rateTiers ?? (switching ? [] : outlet.rateTiers ?? []);
+    const happyHour = dto.happyHour === null
+      ? null
+      : dto.happyHour ?? (switching ? null : outlet.happyHour ?? null);
+    this.validatePricing(pricingMode, rateTiers, happyHour);
+    outlet.pricingMode = pricingMode;
+    outlet.rateTiers = rateTiers;
+    outlet.happyHour = happyHour;
     if (
       dto.active === false &&
       outlet.isActive &&
@@ -223,7 +245,21 @@ export class OutletsService {
       closingHour: outlet.closingHour,
       rate: Number(outlet.hourlyRateIdr),
       rateTiers: outlet.rateTiers,
+      pricingMode: outlet.pricingMode ?? 'duration',
+      happyHour: outlet.happyHour ?? null,
     };
+  }
+
+  private validatePricing(
+    mode: 'duration' | 'happy_hour',
+    tiers: RateTierDto[],
+    happyHour: HappyHourDto | null,
+  ): void {
+    if (mode === 'happy_hour' ? !happyHour || tiers.length > 0 : happyHour !== null) {
+      throw new BadRequestException(
+        'Mode happy hour membutuhkan jadwal dan tidak dapat memakai rate tiers.',
+      );
+    }
   }
 
   private async saveWithConflict(outlet: OutletEntity): Promise<OutletEntity> {
