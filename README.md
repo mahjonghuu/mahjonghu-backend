@@ -58,6 +58,51 @@ INSERT INTO users (auth_subject, email, password_hash, role, is_active)
 VALUES ($1, lower(btrim($2)), $3, 'owner', true);
 ```
 
+## Outlet photo storage
+
+Outlet photo uploads use the Supabase Storage REST API, not PostgreSQL binary or
+base64 storage. Set these **backend-only** variables locally and in each Vercel
+environment that accepts photo changes:
+
+- `SUPABASE_URL`: the project's HTTPS origin, such as
+  `https://your-project.supabase.co` (not the database/pooler URL).
+- `SUPABASE_SERVICE_ROLE_KEY`: the project's server-only service-role key.
+  Never commit it, send it to browsers, or use a `NEXT_PUBLIC_` variable.
+- `SUPABASE_OUTLET_PHOTOS_BUCKET`: optional bucket name, default `outlet-photos`.
+
+In the Supabase dashboard, manually create that bucket as **public**, set its
+maximum file size to **524288 bytes (512 KiB)**, and allow only `image/jpeg`,
+`image/png`, and `image/webp`. Do not add anonymous or browser write/delete
+policies: the backend uses its service-role key for these operations, after
+owner authentication on the JSON outlet mutation endpoints. Use separate
+projects/buckets and credentials for Preview and Production.
+
+The browser still resizes/compresses photos and sends a raster base64 data URL
+in the JSON `photo` field. The backend checks canonical base64, decoded size,
+and JPEG/PNG/WebP signatures before uploading decoded bytes under
+`outlets/<random-uuid>.jpg|png|webp`. The existing `outlets.photo` column stores
+the resulting public object URL; no new base64 is persisted. Responses expose
+that URL or `null`, not a signed URL. Missing/invalid configuration, network
+errors, or unsuccessful storage responses produce a sanitized HTTP 503 when
+uploading a photo; applications without photo changes need no storage credentials.
+Only canonical generated object URLs in the configured origin/bucket can be
+deleted by the storage adapter.
+New uploads are removed if the database write fails. Old objects are deleted
+only after a successful replacement, removal, or archive. Cleanup failures log
+a warning without failing a committed database write; the leftover object may
+need manual removal.
+
+
+**Public bucket means public photos, including photos for private outlets.**
+Anyone who knows a photo URL can fetch it without logging in; outlet access
+controls do not protect those image bytes. Do not upload sensitive images.
+Changing an outlet's visibility does not make its existing photo private.
+
+For a local integration smoke check only, `SUPABASE_URL` may use HTTP on
+`localhost`, `127.0.0.1`, or `::1`; remote endpoints must use HTTPS. Complete
+bucket setup and provide real credentials before attempting a live upload,
+public fetch, and removal check.
+
 ## Deploy to Vercel
 
 Create a separate Vercel project with **Root Directory** set to

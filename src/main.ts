@@ -1,12 +1,17 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 import { requestLoggingMiddleware } from './common/request-logging.middleware.js';
 
 async function bootstrap() {
   console.info('[bootstrap] Starting Nest application');
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
+  // A 512 KiB image grows to ~683 KiB in its JSON/base64 representation.
+  app.useBodyParser('json', { limit: '1mb' });
   console.info('[bootstrap] Nest application created');
   app.use(requestLoggingMiddleware);
   const config = app.get(ConfigService);

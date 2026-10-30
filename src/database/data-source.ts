@@ -10,6 +10,7 @@ import { AddPrivateOutletAccess1791936000000 } from './migrations/1791936000000-
 import { AllowOvernightOutletHours1792022400000 } from './migrations/1792022400000-AllowOvernightOutletHours.js';
 import { MovePricingToOutlets1792108800000 } from './migrations/1792108800000-MovePricingToOutlets.js';
 import { AddHappyHourPricing1792195200000 } from './migrations/1792195200000-AddHappyHourPricing.js';
+import { AddOutletPhoto1792281600000 } from './migrations/1792281600000-AddOutletPhoto.js';
 
 // TypeORM CLI does not bootstrap Nest, so initialize Nest ConfigModule explicitly before the DataSource.
 await ConfigModule.forRoot({
@@ -32,5 +33,6 @@ export default new DataSource({
     AllowOvernightOutletHours1792022400000,
     MovePricingToOutlets1792108800000,
     AddHappyHourPricing1792195200000,
+    AddOutletPhoto1792281600000,
   ],
 });

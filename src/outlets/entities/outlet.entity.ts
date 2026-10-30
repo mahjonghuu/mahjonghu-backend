@@ -23,6 +23,10 @@ export class OutletEntity {
   @Column({ type: 'varchar', length: 240 })
   address!: string;
 
+  /** Public Supabase Storage object URL; null uses the default outlet illustration. */
+  @Column({ type: 'text', nullable: true })
+  photo!: string | null;
+
   @Column({ type: 'varchar', length: 64, default: 'Asia/Jakarta' })
   timezone!: string;
 
@@ -32,7 +36,12 @@ export class OutletEntity {
   @Column({ name: 'rate_tiers', type: 'jsonb', default: () => "'[]'::jsonb" })
   rateTiers!: RateTierDto[];
 
-  @Column({ name: 'pricing_mode', type: 'varchar', length: 10, default: 'duration' })
+  @Column({
+    name: 'pricing_mode',
+    type: 'varchar',
+    length: 10,
+    default: 'duration',
+  })
   pricingMode!: 'duration' | 'happy_hour';
 
   @Column({ name: 'happy_hour', type: 'jsonb', nullable: true })

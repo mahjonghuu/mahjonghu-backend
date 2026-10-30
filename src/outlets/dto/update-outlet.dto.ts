@@ -38,6 +38,11 @@ export class UpdateOutletDto {
   address?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(699075)
+  photo?: string | null;
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Max(1_000_000_000)

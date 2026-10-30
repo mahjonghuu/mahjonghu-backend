@@ -4,6 +4,7 @@ import { InitialSchema1791590400000 } from '../database/migrations/1791590400000
 import { AddDokuPaymentSessions1791763200000 } from '../database/migrations/1791763200000-AddDokuPaymentSessions.js';
 import { MovePricingToOutlets1792108800000 } from '../database/migrations/1792108800000-MovePricingToOutlets.js';
 import { AddHappyHourPricing1792195200000 } from '../database/migrations/1792195200000-AddHappyHourPricing.js';
+import { AddOutletPhoto1792281600000 } from '../database/migrations/1792281600000-AddOutletPhoto.js';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 import type { OutletAccessService } from '../outlets/outlet-access.service.js';
 import { TableEntity } from '../tables/entities/table.entity.js';
@@ -41,6 +42,7 @@ describe.skipIf(!databaseUrl)('BookingsService PostgreSQL phone lookup', () => {
         AddDokuPaymentSessions1791763200000,
         MovePricingToOutlets1792108800000,
         AddHappyHourPricing1792195200000,
+        AddOutletPhoto1792281600000,
       ],
     });
     await dataSource.initialize();
@@ -182,6 +184,8 @@ describe.skipIf(!databaseUrl)('BookingsService PostgreSQL phone lookup', () => {
     ]) {
       expect(await service.lookupByPhone(phone)).toEqual({ bookings });
     }
-    expect(await service.lookupByPhone('081111111111')).toEqual({ bookings: [] });
+    expect(await service.lookupByPhone('081111111111')).toEqual({
+      bookings: [],
+    });
   });
 });

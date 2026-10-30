@@ -34,6 +34,11 @@ export class CreateOutletDto {
   @MaxLength(240)
   address!: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(699075)
+  photo?: string | null;
+
   @IsInt()
   @Min(1)
   @Max(1_000_000_000)

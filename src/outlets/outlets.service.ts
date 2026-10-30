@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -11,12 +12,14 @@ import type { RateTierDto } from './dto/rate-tier.dto.js';
 import type { HappyHourDto } from './dto/happy-hour.dto.js';
 import { UpdateOutletDto } from './dto/update-outlet.dto.js';
 import { OutletEntity } from './entities/outlet.entity.js';
+import { OutletPhotoStorage } from './outlet-photo.storage.js';
 
 type OutletSummary = {
   id: string;
   name: string;
   city: string;
   address: string;
+  photo: string | null;
   visibility: 'public' | 'private';
   rate: number;
   rateTiers: RateTierDto[];
@@ -34,9 +37,12 @@ type OutletDetail = Omit<OutletSummary, 'tableCount' | 'occupiedTableCount'>;
 /** Owns outlet validation and persistence for the operational dashboard. */
 @Injectable()
 export class OutletsService {
+  private readonly logger = new Logger(OutletsService.name);
+
   constructor(
     @InjectRepository(OutletEntity)
     private readonly outlets: Repository<OutletEntity>,
+    private readonly photos: OutletPhotoStorage,
   ) {}
 
   /** Lists non-archived outlets with live table counts. */
@@ -47,6 +53,7 @@ export class OutletsService {
         o.name,
         o.city,
         o.address,
+        o.photo,
         o.is_active AS active,
         o.visibility,
         o.opening_hour AS "openingHour",
@@ -66,6 +73,7 @@ export class OutletsService {
       name: String(row.name),
       city: String(row.city),
       address: String(row.address),
+      photo: (row.photo as string | null) ?? null,
       visibility: row.visibility as 'public' | 'private',
       active: row.active === true,
       rate: Number(row.rate),
@@ -84,7 +92,7 @@ export class OutletsService {
     const rows = await this.outlets.query(
       `
       SELECT
-        o.id, o.name, o.city, o.address, o.is_active AS active,
+        o.id, o.name, o.city, o.address, o.photo, o.is_active AS active,
         o.visibility,
         o.opening_hour AS "openingHour", o.closing_hour AS "closingHour",
         o.hourly_rate_idr AS rate, o.rate_tiers AS "rateTiers",
@@ -110,6 +118,7 @@ export class OutletsService {
       name: String(row.name),
       city: String(row.city),
       address: String(row.address),
+      photo: (row.photo as string | null) ?? null,
       active: row.active === true,
       visibility: row.visibility as 'public' | 'private',
       openingHour: Number(row.openingHour),
@@ -125,12 +134,18 @@ export class OutletsService {
 
   /** Creates a normalized outlet and maps duplicate active names to HTTP 409. */
   async create(dto: CreateOutletDto): Promise<OutletDetail> {
+    this.assertPhotoInput(dto.photo);
     const pricingMode = dto.pricingMode ?? 'duration';
-    this.validatePricing(pricingMode, dto.rateTiers ?? [], dto.happyHour ?? null);
+    this.validatePricing(
+      pricingMode,
+      dto.rateTiers ?? [],
+      dto.happyHour ?? null,
+    );
     const outlet = this.outlets.create({
       name: this.requiredText(dto.name, 'name'),
       city: this.requiredText(dto.city, 'city'),
       address: this.requiredText(dto.address, 'address'),
+      photo: null,
       hourlyRateIdr: String(dto.rate),
       rateTiers: dto.rateTiers ?? [],
       pricingMode,
@@ -145,12 +160,14 @@ export class OutletsService {
         'Jam tutup tidak boleh sama dengan jam buka.',
       );
     }
-    return this.toDetail(await this.saveWithConflict(outlet));
+    return this.toDetail(await this.saveWithPhoto(outlet, dto.photo));
   }
 
   /** Updates outlet details; in-use bookings prevent deactivation. */
   async update(id: string, dto: UpdateOutletDto): Promise<OutletDetail> {
-    const outlet = await this.findOne(id);
+    this.assertPhotoInput(dto.photo);
+    const previous = await this.findOne(id);
+    const outlet = { ...previous };
     if (dto.name !== undefined)
       outlet.name = this.requiredText(dto.name, 'name');
     if (dto.city !== undefined)
@@ -160,10 +177,12 @@ export class OutletsService {
     if (dto.rate !== undefined) outlet.hourlyRateIdr = String(dto.rate);
     const pricingMode = dto.pricingMode ?? outlet.pricingMode ?? 'duration';
     const switching = pricingMode !== (outlet.pricingMode ?? 'duration');
-    const rateTiers = dto.rateTiers ?? (switching ? [] : outlet.rateTiers ?? []);
-    const happyHour = dto.happyHour === null
-      ? null
-      : dto.happyHour ?? (switching ? null : outlet.happyHour ?? null);
+    const rateTiers =
+      dto.rateTiers ?? (switching ? [] : (outlet.rateTiers ?? []));
+    const happyHour =
+      dto.happyHour === null
+        ? null
+        : (dto.happyHour ?? (switching ? null : (outlet.happyHour ?? null)));
     this.validatePricing(pricingMode, rateTiers, happyHour);
     outlet.pricingMode = pricingMode;
     outlet.rateTiers = rateTiers;
@@ -186,7 +205,9 @@ export class OutletsService {
         'Jam tutup tidak boleh sama dengan jam buka.',
       );
     }
-    return this.toDetail(await this.saveWithConflict(outlet));
+    return this.toDetail(
+      await this.saveWithPhoto(outlet, dto.photo, previous.photo),
+    );
   }
 
   /** Archives an outlet only when it has no tables or booking history. */
@@ -207,9 +228,12 @@ export class OutletsService {
         'Outlet masih memiliki meja atau riwayat reservasi dan tidak dapat dihapus.',
       );
     }
+    const previousPhoto = outlet.photo;
     outlet.isActive = false;
     outlet.archivedAt = new Date();
+    outlet.photo = null;
     await this.outlets.save(outlet);
+    if (previousPhoto) await this.cleanupPhoto(previousPhoto);
   }
 
   private async findOne(id: string): Promise<OutletEntity> {
@@ -239,6 +263,7 @@ export class OutletsService {
       name: outlet.name,
       city: outlet.city,
       address: outlet.address,
+      photo: outlet.photo ?? null,
       visibility: outlet.visibility,
       active: outlet.isActive,
       openingHour: outlet.openingHour,
@@ -250,12 +275,55 @@ export class OutletsService {
     };
   }
 
+  private assertPhotoInput(value: unknown): void {
+    if (value !== undefined && value !== null && typeof value !== 'string') {
+      throw new BadRequestException('Foto harus berupa data URL atau null.');
+    }
+  }
+
+  /** Uploads before saving, compensates failures, and retires old files after commit. */
+  private async saveWithPhoto(
+    outlet: OutletEntity,
+    photo: string | null | undefined,
+    previousPhoto: string | null = null,
+  ): Promise<OutletEntity> {
+    const uploaded =
+      typeof photo === 'string' ? await this.photos.upload(photo) : null;
+    if (photo !== undefined) outlet.photo = uploaded;
+    let saved: OutletEntity;
+    try {
+      saved = await this.saveWithConflict(outlet);
+    } catch (error) {
+      if (uploaded) await this.cleanupPhoto(uploaded);
+      throw error;
+    }
+    if (photo !== undefined && previousPhoto && previousPhoto !== saved.photo) {
+      await this.cleanupPhoto(previousPhoto);
+    }
+    return saved;
+  }
+
+  /** Storage cleanup must never hide a database failure or fail a committed write. */
+  private async cleanupPhoto(url: string): Promise<void> {
+    try {
+      await this.photos.remove(url);
+    } catch {
+      this.logger.warn(
+        'Outlet photo cleanup failed; the object may require manual removal.',
+      );
+    }
+  }
+
   private validatePricing(
     mode: 'duration' | 'happy_hour',
     tiers: RateTierDto[],
     happyHour: HappyHourDto | null,
   ): void {
-    if (mode === 'happy_hour' ? !happyHour || tiers.length > 0 : happyHour !== null) {
+    if (
+      mode === 'happy_hour'
+        ? !happyHour || tiers.length > 0
+        : happyHour !== null
+    ) {
       throw new BadRequestException(
         'Mode happy hour membutuhkan jadwal dan tidak dapat memakai rate tiers.',
       );
