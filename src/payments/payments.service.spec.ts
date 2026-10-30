@@ -1,4 +1,4 @@
-import type { ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import type { DataSource, Repository } from 'typeorm';
 import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 import type { OutletAccessService } from '../outlets/outlet-access.service.js';
@@ -17,7 +17,7 @@ function createService(
   sessions: Partial<Repository<PaymentSessionEntity>>,
   dataSource: Partial<DataSource>,
   doku: Partial<DokuClientService> = {},
-  config: Partial<ConfigService> = {},
+  config: ConfigService = new ConfigService(),
 ) {
   return new PaymentsService(
     sessions as Repository<PaymentSessionEntity>,
@@ -26,56 +26,93 @@ function createService(
     {
       allowed: vi.fn().mockResolvedValue(true),
     } as unknown as OutletAccessService,
-    config as ConfigService,
+    config,
   );
 }
 
 describe('bookingPrice', () => {
-  const outlet = {
+  const outlet: OutletEntity = {
+    id: outletId,
+    name: 'Test Outlet',
+    city: 'Jakarta',
+    address: 'Test address',
+    photo: null,
     timezone: 'Asia/Jakarta',
     hourlyRateIdr: '100000',
     rateTiers: [],
     pricingMode: 'happy_hour',
-    happyHour: { days: [1, 2, 3, 4, 5], startHour: 16, endHour: 19, rate: 60000 },
-  } as OutletEntity;
+    happyHour: {
+      days: [1, 2, 3, 4, 5],
+      startHour: 16,
+      endHour: 19,
+      rate: 60000,
+    },
+    openingHour: 12,
+    closingHour: 22,
+    visibility: 'public',
+    isActive: true,
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
   const price = (instant: string, hours: number, configuration = outlet) =>
     bookingPrice(configuration, new Date(instant), hours);
 
   it('applies local weekday hours and crosses the 16:00 and 19:00 boundaries per hour', () => {
     expect(price('2026-10-19T08:00:00Z', 2)).toEqual({
-      hourlyRateIdr: '100000', amount: 160000n,
+      hourlyRateIdr: '100000',
+      amount: 160000n,
     }); // Monday 15:00–17:00
     expect(price('2026-10-19T09:00:00Z', 4)).toEqual({
-      hourlyRateIdr: '60000', amount: 280000n,
+      hourlyRateIdr: '60000',
+      amount: 280000n,
     }); // Monday 16:00–20:00
     expect(price('2026-10-19T08:00:00Z', 1)).toEqual({
-      hourlyRateIdr: '100000', amount: 100000n,
+      hourlyRateIdr: '100000',
+      amount: 100000n,
     });
   });
 
   it('checks selected weekdays, weekends, and the actual day after midnight', () => {
     expect(price('2026-10-24T09:00:00Z', 2)).toEqual({
-      hourlyRateIdr: '100000', amount: 200000n,
+      hourlyRateIdr: '100000',
+      amount: 200000n,
     }); // Saturday 16:00
-    expect(price('2026-10-20T09:00:00Z', 2, {
-      ...outlet, happyHour: { days: [1, 6], startHour: 16, endHour: 19, rate: 60000 },
-    })).toEqual({ hourlyRateIdr: '100000', amount: 200000n }); // Tuesday excluded
-    expect(price('2026-10-24T09:00:00Z', 2, {
-      ...outlet, happyHour: { days: [1, 6], startHour: 16, endHour: 19, rate: 60000 },
-    })).toEqual({ hourlyRateIdr: '60000', amount: 120000n }); // Saturday selected
-    expect(price('2026-10-18T17:00:00Z', 2, {
-      ...outlet, happyHour: { days: [1], startHour: 0, endHour: 2, rate: 60000 },
-    })).toEqual({ hourlyRateIdr: '60000', amount: 120000n }); // Monday 00:00 local
-    expect(price('2026-10-18T16:00:00Z', 2, {
-      ...outlet, happyHour: { days: [1], startHour: 0, endHour: 2, rate: 60000 },
-    })).toEqual({ hourlyRateIdr: '100000', amount: 160000n }); // Sunday 23:00 then Monday midnight
+    expect(
+      price('2026-10-20T09:00:00Z', 2, {
+        ...outlet,
+        happyHour: { days: [1, 6], startHour: 16, endHour: 19, rate: 60000 },
+      }),
+    ).toEqual({ hourlyRateIdr: '100000', amount: 200000n }); // Tuesday excluded
+    expect(
+      price('2026-10-24T09:00:00Z', 2, {
+        ...outlet,
+        happyHour: { days: [1, 6], startHour: 16, endHour: 19, rate: 60000 },
+      }),
+    ).toEqual({ hourlyRateIdr: '60000', amount: 120000n }); // Saturday selected
+    expect(
+      price('2026-10-18T17:00:00Z', 2, {
+        ...outlet,
+        happyHour: { days: [1], startHour: 0, endHour: 2, rate: 60000 },
+      }),
+    ).toEqual({ hourlyRateIdr: '60000', amount: 120000n }); // Monday 00:00 local
+    expect(
+      price('2026-10-18T16:00:00Z', 2, {
+        ...outlet,
+        happyHour: { days: [1], startHour: 0, endHour: 2, rate: 60000 },
+      }),
+    ).toEqual({ hourlyRateIdr: '100000', amount: 160000n }); // Sunday 23:00 then Monday midnight
   });
 
   it('leaves duration tiers unchanged', () => {
-    expect(price('2026-10-19T09:00:00Z', 3, {
-      ...outlet, pricingMode: 'duration',
-      happyHour: null, rateTiers: [{ durationHours: 2, rate: 80000 }],
-    })).toEqual({ hourlyRateIdr: '80000', amount: 240000n });
+    expect(
+      price('2026-10-19T09:00:00Z', 3, {
+        ...outlet,
+        pricingMode: 'duration',
+        happyHour: null,
+        rateTiers: [{ durationHours: 2, rate: 80000 }],
+      }),
+    ).toEqual({ hourlyRateIdr: '80000', amount: 240000n });
   });
 });
 
@@ -86,7 +123,12 @@ describe('PaymentsService', () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     const sessionRecord: Record<string, unknown> = {};
-    const bookingRows: Record<string, unknown>[] = [];
+    const bookingRows: {
+      reference: unknown;
+      hourlyRateIdr: unknown;
+      totalAmountIdr: unknown;
+      holdExpiresAt: Date;
+    }[] = [];
     const paymentRows: Record<string, unknown>[] = [];
     const sessionRepository = {
       create: vi.fn((row) => ({ ...row })),
@@ -100,9 +142,7 @@ describe('PaymentsService', () => {
       andWhere: vi.fn().mockReturnThis(),
       orderBy: vi.fn().mockReturnThis(),
       setLock: vi.fn().mockReturnThis(),
-      getMany: vi
-        .fn()
-        .mockResolvedValue([{ id: tableId, outletId }]),
+      getMany: vi.fn().mockResolvedValue([{ id: tableId, outletId }]),
     };
     const tablesRepository = { createQueryBuilder: vi.fn(() => tableQuery) };
     const outletRepository = {
@@ -123,11 +163,15 @@ describe('PaymentsService', () => {
       query: vi.fn(async (sql: string, parameters: unknown[] = []) => {
         if (sql.includes('INSERT INTO bookings')) {
           for (let index = 0; index < parameters.length / 13; index += 1) {
+            const holdExpiresAt = parameters[index * 13 + 12];
+            if (!(holdExpiresAt instanceof Date)) {
+              throw new Error('Expected booking hold expiry to be a Date');
+            }
             bookingRows.push({
               reference: parameters[index * 13],
               hourlyRateIdr: parameters[index * 13 + 9],
               totalAmountIdr: parameters[index * 13 + 10],
-              holdExpiresAt: parameters[index * 13 + 12],
+              holdExpiresAt,
             });
           }
           return Array.from({ length: parameters.length / 13 }, (_, index) => ({
@@ -158,15 +202,10 @@ describe('PaymentsService', () => {
         expiresAt: providerExpiry,
       }),
     };
-    const config = {
-      get: vi.fn((key: string, fallback?: string) =>
-        key === 'WEB_PUBLIC_URL'
-          ? 'https://booking.example.com'
-          : key === 'BACKEND_PUBLIC_URL'
-            ? 'https://api.example.com'
-            : fallback,
-      ),
-    };
+    const config = new ConfigService({
+      WEB_PUBLIC_URL: 'https://booking.example.com',
+      BACKEND_PUBLIC_URL: 'https://api.example.com',
+    });
     const sessions = {};
     const service = createService(sessions, dataSource, doku, config);
     const dto: CreateDokuCheckoutDto = {
@@ -190,11 +229,16 @@ describe('PaymentsService', () => {
       expect.objectContaining({ amount: 340_000 }),
     );
     expect(bookingRows).toHaveLength(2);
-    expect(bookingRows.map((row) => [row.hourlyRateIdr, row.totalAmountIdr])).toEqual([
+    expect(
+      bookingRows.map((row) => [row.hourlyRateIdr, row.totalAmountIdr]),
+    ).toEqual([
       ['100000', '100000'],
       ['80000', '240000'],
     ]);
-    expect(paymentRows.map((row) => row.amountIdr)).toEqual(['100000', '240000']);
+    expect(paymentRows.map((row) => row.amountIdr)).toEqual([
+      '100000',
+      '240000',
+    ]);
     expect(
       bookingRows.every(
         (row) => row.holdExpiresAt.getTime() === providerExpiry.getTime(),
@@ -259,12 +303,9 @@ describe('PaymentsService', () => {
         return {};
       }),
     };
-    const service = createService(
-      {},
-      {
-        transaction: vi.fn((callback) => callback(manager)),
-      } as Partial<DataSource>,
-    );
+    const service = createService({}, {
+      transaction: vi.fn((callback) => callback(manager)),
+    } as Partial<DataSource>);
     const checkout = (start: string, durationHours: number) =>
       service.createCheckout('dev', {
         outletId,
@@ -284,24 +325,32 @@ describe('PaymentsService', () => {
     expect(getMany).toHaveBeenCalledTimes(2);
 
     // 04:00–05:00, 12:00–13:00, and overrunning the next-day close.
-    await expect(checkout('2026-10-13T21:00:00.000Z', 1)).rejects.toMatchObject({
-      status: 400,
-    });
-    await expect(checkout('2026-10-13T05:00:00.000Z', 1)).rejects.toMatchObject({
-      status: 400,
-    });
-    await expect(checkout('2026-10-13T20:00:00.000Z', 2)).rejects.toMatchObject({
-      status: 400,
-    });
+    await expect(checkout('2026-10-13T21:00:00.000Z', 1)).rejects.toMatchObject(
+      {
+        status: 400,
+      },
+    );
+    await expect(checkout('2026-10-13T05:00:00.000Z', 1)).rejects.toMatchObject(
+      {
+        status: 400,
+      },
+    );
+    await expect(checkout('2026-10-13T20:00:00.000Z', 2)).rejects.toMatchObject(
+      {
+        status: 400,
+      },
+    );
     expect(getMany).toHaveBeenCalledTimes(2);
 
     outlet.closingHour = 0;
     await expect(checkout('2026-10-13T16:00:00.000Z', 1)).rejects.toBe(
       reachedTableLookup,
     );
-    await expect(checkout('2026-10-13T17:00:00.000Z', 1)).rejects.toMatchObject({
-      status: 400,
-    });
+    await expect(checkout('2026-10-13T17:00:00.000Z', 1)).rejects.toMatchObject(
+      {
+        status: 400,
+      },
+    );
     outlet.closingHour = 24;
     await expect(checkout('2026-10-13T16:00:00.000Z', 1)).rejects.toBe(
       reachedTableLookup,
@@ -329,7 +378,7 @@ describe('PaymentsService', () => {
       {
         allowed: vi.fn().mockResolvedValue(false),
       } as unknown as OutletAccessService,
-      {} as ConfigService,
+      new ConfigService(),
     );
     await expect(
       service.createCheckout('dev', {

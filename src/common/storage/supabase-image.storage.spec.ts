@@ -3,7 +3,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import { OutletPhotoStorage } from './outlet-photo.storage.js';
+import { SupabaseImageStorage } from './supabase-image.storage.js';
 
 const ORIGIN = 'https://photos.example.supabase.co';
 const UUID = '12345678-1234-4123-8123-123456789abc';
@@ -20,7 +20,7 @@ function createStorage(overrides: Record<string, string | undefined> = {}) {
   };
   const get = vi.fn((key: string) => values[key]);
   return {
-    storage: new OutletPhotoStorage({ get } as unknown as ConfigService),
+    storage: new SupabaseImageStorage({ get } as unknown as ConfigService),
     get,
   };
 }
@@ -29,8 +29,94 @@ function dataUrl(format: string, bytes: Buffer) {
   return `data:image/${format};base64,${bytes.toString('base64')}`;
 }
 
-describe('OutletPhotoStorage', () => {
+describe('SupabaseImageStorage', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each([undefined, ' advertisement images#1 '])(
+    'uploads and removes advertisements in their configured bucket: %s',
+    async (configuredBucket) => {
+      const fetch = vi.fn().mockResolvedValue(new Response('{}'));
+      vi.stubGlobal('fetch', fetch);
+      const { storage } = createStorage({
+        SUPABASE_ADVERTISEMENT_IMAGES_BUCKET: configuredBucket,
+      });
+      const bucket = encodeURIComponent(
+        configuredBucket?.trim() || 'advertisement-images',
+      );
+      const url = await storage.upload(dataUrl('png', PNG), 'advertisements');
+      expect(url).toMatch(
+        new RegExp(
+          `^${ORIGIN.replaceAll('.', '\\.')}\\/storage/v1/object/public/${bucket}/advertisements/[0-9a-f-]+\\.png$`,
+        ),
+      );
+      expect(fetch.mock.calls[0][0]).toBe(
+        url.replace('/object/public/', '/object/'),
+      );
+      await storage.remove(url, 'advertisements');
+      expect(fetch.mock.calls[1][0]).toBe(
+        `${ORIGIN}/storage/v1/object/${bucket}`,
+      );
+      expect(JSON.parse(String(fetch.mock.calls[1][1].body))).toEqual({
+        prefixes: [url.split(`/public/${bucket}/`)[1]],
+      });
+    },
+  );
+
+  it.each([false, true])(
+    'rejects cross-collection deletion even with shared buckets: %s',
+    async (sharedBucket) => {
+      const fetch = vi.fn();
+      vi.stubGlobal('fetch', fetch);
+      const { storage } = createStorage(
+        sharedBucket
+          ? {
+              SUPABASE_ADVERTISEMENT_IMAGES_BUCKET: 'outlet-photos',
+            }
+          : {},
+      );
+      const adBucket = sharedBucket ? 'outlet-photos' : 'advertisement-images';
+      const adUrl = `${ORIGIN}/storage/v1/object/public/${adBucket}/advertisements/${UUID}.png`;
+      await expect(
+        storage.remove(PUBLIC_URL, 'advertisements'),
+      ).rejects.toThrow(BadRequestException);
+      await expect(storage.remove(adUrl, 'outlets')).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(
+        storage.remove(
+          adUrl.replace('/advertisements/', '/outlets/'),
+          'advertisements',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an unsafe advertisement bucket before HTTP', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const { storage } = createStorage({
+      SUPABASE_ADVERTISEMENT_IMAGES_BUCKET: '..',
+    });
+    await expect(
+      storage.upload(dataUrl('png', PNG), 'advertisements'),
+    ).rejects.toThrow(ServiceUnavailableException);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '/advertisements/../advertisements/',
+    '/advertisements%2F',
+    '/advertisements/nested/',
+  ])('rejects noncanonical advertisement namespaces: %s', async (namespace) => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const url = `${ORIGIN}/storage/v1/object/public/advertisement-images${namespace}${UUID}.png`;
+    await expect(
+      createStorage().storage.remove(url, 'advertisements'),
+    ).rejects.toThrow(BadRequestException);
+    expect(fetch).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['jpeg', 'jpg', JPEG],
@@ -45,7 +131,7 @@ describe('OutletPhotoStorage', () => {
       vi.stubGlobal('fetch', fetch);
       const { storage } = createStorage();
 
-      const url = await storage.upload(dataUrl(format, bytes));
+      const url = await storage.upload(dataUrl(format, bytes), 'outlets');
       expect(url).toMatch(
         new RegExp(
           `^${ORIGIN.replaceAll('.', '\\.')}\\/storage/v1/object/public/outlet-photos/outlets/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.${extension}$`,
@@ -64,7 +150,9 @@ describe('OutletPhotoStorage', () => {
       expect(headers.get('Authorization')).toBe('Bearer server-only-secret');
       expect(headers.get('apikey')).toBe('server-only-secret');
       expect(headers.has('x-upsert')).toBe(false);
-      expect(await storage.upload(dataUrl(format, bytes))).not.toBe(url);
+      expect(await storage.upload(dataUrl(format, bytes), 'outlets')).not.toBe(
+        url,
+      );
     },
   );
 
@@ -74,11 +162,14 @@ describe('OutletPhotoStorage', () => {
     const { storage } = createStorage();
     const limit = Buffer.alloc(524288);
     PNG.copy(limit);
-    await storage.upload(dataUrl('png', limit));
+    await storage.upload(dataUrl('png', limit), 'outlets');
     expect(Buffer.from(fetch.mock.calls[0][1].body)).toEqual(limit);
     fetch.mockClear();
     await expect(
-      storage.upload(dataUrl('png', Buffer.concat([limit, Buffer.from([0])]))),
+      storage.upload(
+        dataUrl('png', Buffer.concat([limit, Buffer.from([0])])),
+        'outlets',
+      ),
     ).rejects.toThrow(BadRequestException);
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -100,12 +191,12 @@ describe('OutletPhotoStorage', () => {
     null,
     undefined,
   ])(
-    'rejects invalid photo input before configuration or HTTP',
-    async (photo) => {
+    'rejects invalid image input before configuration or HTTP',
+    async (image) => {
       const fetch = vi.fn();
       vi.stubGlobal('fetch', fetch);
       const { storage, get } = createStorage({ SUPABASE_URL: undefined });
-      await expect(storage.upload(photo as string)).rejects.toThrow(
+      await expect(storage.upload(image as string, 'outlets')).rejects.toThrow(
         BadRequestException,
       );
       expect(fetch).not.toHaveBeenCalled();
@@ -113,14 +204,14 @@ describe('OutletPhotoStorage', () => {
     },
   );
 
-  it('reads configuration only when a photo operation is performed', async () => {
+  it('reads configuration only when an image operation is performed', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     const { storage, get } = createStorage({ SUPABASE_URL: undefined });
     expect(get).not.toHaveBeenCalled();
-    await expect(storage.upload(dataUrl('png', PNG))).rejects.toThrow(
-      ServiceUnavailableException,
-    );
+    await expect(
+      storage.upload(dataUrl('png', PNG), 'outlets'),
+    ).rejects.toThrow(ServiceUnavailableException);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -142,10 +233,10 @@ describe('OutletPhotoStorage', () => {
       const fetch = vi.fn();
       vi.stubGlobal('fetch', fetch);
       const { storage } = createStorage(overrides);
-      await expect(storage.upload(dataUrl('png', PNG))).rejects.toThrow(
-        ServiceUnavailableException,
-      );
-      await expect(storage.remove(PUBLIC_URL)).rejects.toThrow(
+      await expect(
+        storage.upload(dataUrl('png', PNG), 'outlets'),
+      ).rejects.toThrow(ServiceUnavailableException);
+      await expect(storage.remove(PUBLIC_URL, 'outlets')).rejects.toThrow(
         ServiceUnavailableException,
       );
       expect(fetch).not.toHaveBeenCalled();
@@ -159,11 +250,11 @@ describe('OutletPhotoStorage', () => {
       SUPABASE_URL: ` ${ORIGIN.toUpperCase()}/ `,
       SUPABASE_OUTLET_PHOTOS_BUCKET: ' outlet photos#1 ',
     });
-    const url = await storage.upload(dataUrl('png', PNG));
+    const url = await storage.upload(dataUrl('png', PNG), 'outlets');
     expect(url).toContain(
       `${ORIGIN}/storage/v1/object/public/outlet%20photos%231/outlets/`,
     );
-    await storage.remove(url);
+    await storage.remove(url, 'outlets');
     expect(fetch.mock.calls[1][0]).toBe(
       `${ORIGIN}/storage/v1/object/outlet%20photos%231`,
     );
@@ -177,7 +268,7 @@ describe('OutletPhotoStorage', () => {
     const fetch = vi.fn().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', fetch);
     const { storage } = createStorage({ SUPABASE_URL: origin });
-    expect(await storage.upload(dataUrl('png', PNG))).toContain(
+    expect(await storage.upload(dataUrl('png', PNG), 'outlets')).toContain(
       `${origin}/storage/`,
     );
   });
@@ -185,7 +276,7 @@ describe('OutletPhotoStorage', () => {
   it('deletes only the generated object path using authenticated Supabase JSON', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', fetch);
-    await createStorage().storage.remove(PUBLIC_URL);
+    await createStorage().storage.remove(PUBLIC_URL, 'outlets');
     expect(fetch).toHaveBeenCalledOnce();
     expect(fetch.mock.calls[0][0]).toBe(
       `${ORIGIN}/storage/v1/object/outlet-photos`,
@@ -228,7 +319,7 @@ describe('OutletPhotoStorage', () => {
       const fetch = vi.fn();
       vi.stubGlobal('fetch', fetch);
       await expect(
-        createStorage().storage.remove(url as string),
+        createStorage().storage.remove(url as string, 'outlets'),
       ).rejects.toThrow(BadRequestException);
       expect(fetch).not.toHaveBeenCalled();
     },
@@ -246,18 +337,18 @@ describe('OutletPhotoStorage', () => {
         );
         const result =
           operation === 'upload'
-            ? storage.upload(dataUrl('png', PNG))
-            : storage.remove(PUBLIC_URL);
+            ? storage.upload(dataUrl('png', PNG), 'outlets')
+            : storage.remove(PUBLIC_URL, 'outlets');
         await expect(result).rejects.toMatchObject({
           status: 503,
-          message: 'Penyimpanan foto outlet tidak tersedia.',
+          message: 'Image storage is unavailable.',
         });
       }
       fetch.mockRejectedValueOnce(new Error('network server-only-secret'));
       const result =
         operation === 'upload'
-          ? storage.upload(dataUrl('png', PNG))
-          : storage.remove(PUBLIC_URL);
+          ? storage.upload(dataUrl('png', PNG), 'outlets')
+          : storage.remove(PUBLIC_URL, 'outlets');
       await expect(result).rejects.toThrow(ServiceUnavailableException);
       await expect(result).rejects.not.toThrow('server-only-secret');
     },

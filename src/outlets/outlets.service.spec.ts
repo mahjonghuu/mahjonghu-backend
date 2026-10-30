@@ -10,7 +10,7 @@ import { CreateOutletDto } from './dto/create-outlet.dto.js';
 import { UpdateOutletDto } from './dto/update-outlet.dto.js';
 import { OutletEntity } from './entities/outlet.entity.js';
 import { OutletsService } from './outlets.service.js';
-import { OutletPhotoStorage } from './outlet-photo.storage.js';
+import { SupabaseImageStorage } from '../common/storage/supabase-image.storage.js';
 
 describe('OutletsService', () => {
   function createService() {
@@ -33,7 +33,7 @@ describe('OutletsService', () => {
       photos,
       service: new OutletsService(
         repository as unknown as Repository<OutletEntity>,
-        photos as unknown as OutletPhotoStorage,
+        photos as unknown as SupabaseImageStorage,
       ),
     };
   }
@@ -182,7 +182,7 @@ describe('OutletsService', () => {
       ...value,
     }));
     repository.save.mockImplementation(async (value: OutletEntity) => {
-      expect(photos.upload).toHaveBeenCalledWith(photo);
+      expect(photos.upload).toHaveBeenCalledWith(photo, 'outlets');
       expect(value.photo).toBe(newUrl);
       return value;
     });
@@ -230,7 +230,7 @@ describe('OutletsService', () => {
       await expect(
         service.update('outlet-1', { photo: replacement }),
       ).resolves.toMatchObject({ photo: expected });
-      expect(photos.remove).toHaveBeenCalledExactlyOnceWith(oldUrl);
+      expect(photos.remove).toHaveBeenCalledExactlyOnceWith(oldUrl, 'outlets');
       expect(photos.upload).toHaveBeenCalledTimes(replacement === null ? 0 : 1);
     },
   );
@@ -242,7 +242,7 @@ describe('OutletsService', () => {
     repository.findOneBy.mockResolvedValue(previous);
     repository.save.mockRejectedValue(failure);
     await expect(service.update('outlet-1', { photo })).rejects.toBe(failure);
-    expect(photos.remove).toHaveBeenCalledExactlyOnceWith(newUrl);
+    expect(photos.remove).toHaveBeenCalledExactlyOnceWith(newUrl, 'outlets');
     expect(previous.photo).toBe(oldUrl);
   });
 
@@ -278,7 +278,7 @@ describe('OutletsService', () => {
           photo,
         }),
       ).rejects.toMatchObject({ status: 409 });
-      expect(photos.remove).toHaveBeenCalledExactlyOnceWith(newUrl);
+      expect(photos.remove).toHaveBeenCalledExactlyOnceWith(newUrl, 'outlets');
       expect(warning).toHaveBeenCalled();
     } finally {
       warning.mockRestore();
@@ -297,7 +297,7 @@ describe('OutletsService', () => {
       await expect(
         service.update('outlet-1', { photo }),
       ).resolves.toMatchObject({ photo: newUrl });
-      expect(photos.remove).toHaveBeenCalledExactlyOnceWith(oldUrl);
+      expect(photos.remove).toHaveBeenCalledExactlyOnceWith(oldUrl, 'outlets');
       expect(warning).toHaveBeenCalled();
     } finally {
       warning.mockRestore();
@@ -749,7 +749,7 @@ describe('OutletsService', () => {
     expect(outlet.archivedAt).toBeInstanceOf(Date);
     expect(repository.save).toHaveBeenCalledWith(outlet);
     expect(outlet.photo).toBeNull();
-    expect(photos.remove).toHaveBeenCalledExactlyOnceWith(oldUrl);
+    expect(photos.remove).toHaveBeenCalledExactlyOnceWith(oldUrl, 'outlets');
   });
 
   it('keeps the old photo file when archive persistence fails', async () => {
@@ -777,7 +777,7 @@ describe('OutletsService', () => {
       .mockImplementation(() => undefined);
     try {
       await expect(service.archive('outlet-1')).resolves.toBeUndefined();
-      expect(photos.remove).toHaveBeenCalledExactlyOnceWith(oldUrl);
+      expect(photos.remove).toHaveBeenCalledExactlyOnceWith(oldUrl, 'outlets');
       expect(warning).toHaveBeenCalled();
     } finally {
       warning.mockRestore();

@@ -12,7 +12,7 @@ import type { RateTierDto } from './dto/rate-tier.dto.js';
 import type { HappyHourDto } from './dto/happy-hour.dto.js';
 import { UpdateOutletDto } from './dto/update-outlet.dto.js';
 import { OutletEntity } from './entities/outlet.entity.js';
-import { OutletPhotoStorage } from './outlet-photo.storage.js';
+import { SupabaseImageStorage } from '../common/storage/supabase-image.storage.js';
 
 type OutletSummary = {
   id: string;
@@ -42,7 +42,7 @@ export class OutletsService {
   constructor(
     @InjectRepository(OutletEntity)
     private readonly outlets: Repository<OutletEntity>,
-    private readonly photos: OutletPhotoStorage,
+    private readonly photos: SupabaseImageStorage,
   ) {}
 
   /** Lists non-archived outlets with live table counts. */
@@ -288,7 +288,9 @@ export class OutletsService {
     previousPhoto: string | null = null,
   ): Promise<OutletEntity> {
     const uploaded =
-      typeof photo === 'string' ? await this.photos.upload(photo) : null;
+      typeof photo === 'string'
+        ? await this.photos.upload(photo, 'outlets')
+        : null;
     if (photo !== undefined) outlet.photo = uploaded;
     let saved: OutletEntity;
     try {
@@ -306,7 +308,7 @@ export class OutletsService {
   /** Storage cleanup must never hide a database failure or fail a committed write. */
   private async cleanupPhoto(url: string): Promise<void> {
     try {
-      await this.photos.remove(url);
+      await this.photos.remove(url, 'outlets');
     } catch {
       this.logger.warn(
         'Outlet photo cleanup failed; the object may require manual removal.',

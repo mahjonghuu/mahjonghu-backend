@@ -3,7 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import type { App } from 'supertest/types';
+import type { App } from 'supertest/types.js';
 import { CustomerAuthService } from '../auth/customer-auth.service.js';
 import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { BookingsController } from './bookings.controller.js';
@@ -34,7 +34,7 @@ describe('BookingsController', () => {
         },
       ],
     }).compile();
-    app = module.createNestApplication<App>();
+    app = module.createNestApplication<INestApplication<App>>();
     app.useGlobalPipes(
       new ValidationPipe({
         transform: true,

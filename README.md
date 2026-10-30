@@ -58,24 +58,27 @@ INSERT INTO users (auth_subject, email, password_hash, role, is_active)
 VALUES ($1, lower(btrim($2)), $3, 'owner', true);
 ```
 
-## Outlet photo storage
+## Image storage
 
-Outlet photo uploads use the Supabase Storage REST API, not PostgreSQL binary or
+Outlet photos and advertisement images share the generic `SupabaseImageStorage`
+provider, which uses the Supabase Storage REST API, not PostgreSQL binary or
 base64 storage. Set these **backend-only** variables locally and in each Vercel
-environment that accepts photo changes:
+environment that accepts image changes:
 
 - `SUPABASE_URL`: the project's HTTPS origin, such as
   `https://your-project.supabase.co` (not the database/pooler URL).
 - `SUPABASE_SERVICE_ROLE_KEY`: the project's server-only service-role key.
   Never commit it, send it to browsers, or use a `NEXT_PUBLIC_` variable.
 - `SUPABASE_OUTLET_PHOTOS_BUCKET`: optional bucket name, default `outlet-photos`.
+- `SUPABASE_ADVERTISEMENT_IMAGES_BUCKET`: optional bucket name, default
+  `advertisement-images`.
 
-In the Supabase dashboard, manually create that bucket as **public**, set its
-maximum file size to **524288 bytes (512 KiB)**, and allow only `image/jpeg`,
-`image/png`, and `image/webp`. Do not add anonymous or browser write/delete
-policies: the backend uses its service-role key for these operations, after
-owner authentication on the JSON outlet mutation endpoints. Use separate
-projects/buckets and credentials for Preview and Production.
+In each environment, manually create both configured buckets in the Supabase
+dashboard as **public**, set each maximum file size to **524288 bytes (512 KiB)**,
+and allow only `image/jpeg`, `image/png`, and `image/webp`. Do not add anonymous
+or browser write/delete policies: the backend uses its service-role key for
+these operations after owner authentication on the JSON mutation endpoints.
+Use separate projects/buckets and credentials for Preview and Production.
 
 The browser still resizes/compresses photos and sends a raster base64 data URL
 in the JSON `photo` field. The backend checks canonical base64, decoded size,
@@ -84,7 +87,7 @@ and JPEG/PNG/WebP signatures before uploading decoded bytes under
 the resulting public object URL; no new base64 is persisted. Responses expose
 that URL or `null`, not a signed URL. Missing/invalid configuration, network
 errors, or unsuccessful storage responses produce a sanitized HTTP 503 when
-uploading a photo; applications without photo changes need no storage credentials.
+uploading an image; applications without image changes need no storage credentials.
 Only canonical generated object URLs in the configured origin/bucket can be
 deleted by the storage adapter.
 New uploads are removed if the database write fails. Old objects are deleted
@@ -102,6 +105,63 @@ For a local integration smoke check only, `SUPABASE_URL` may use HTTP on
 `localhost`, `127.0.0.1`, or `::1`; remote endpoints must use HTTPS. Complete
 bucket setup and provide real credentials before attempting a live upload,
 public fetch, and removal check.
+
+## Scheduled advertisements
+
+Apply the `AddAdvertisements` database migration using the standard
+`npm run migration:run` deployment step described in Setup, after confirming the
+target database. It creates the advertisement table and schedule constraints;
+there is no existing-data backfill. Provision the advertisement bucket in every
+new environment using [Image storage](#image-storage) above. Advertisement
+uploads use the same backend-only `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` as outlet photos; the outlet bucket configuration
+remains unchanged.
+
+- `GET /advertisements` lists all advertisements for an authenticated owner.
+- `POST /advertisements` creates an advertisement with JSON fields `title`,
+  `image`, `startsOn`, and `endsOn`, all required.
+- `PATCH /advertisements/:id` partially updates those same fields. Omit `image`
+  to preserve the current image; supplying it replaces the image. An empty or
+  `null` image is not a way to remove it.
+- `DELETE /advertisements/:id` permanently deletes the advertisement and returns
+  `204 No Content`.
+- `GET /advertisements/public` requires no authentication and returns only
+  currently active advertisements. Both list endpoints send
+  `Cache-Control: no-store`.
+
+Owner routes require a valid owner JWT via `Authorization: Bearer <token>` or
+the `ownerToken` cookie; customer JWTs are not accepted. As with outlet
+mutations, requests carrying the owner cookie must send an `Origin` exactly
+matching `WEB_ORIGIN` for POST, PATCH, and DELETE (including when a bearer token
+is also supplied). Browser requests use the credentialed CORS and same-site
+cookie rules described under authentication below.
+
+`title` is trimmed and must contain 1–80 characters. For create, `image` must
+contain the browser-resized/compressed JPEG, PNG, or WebP base64 data URL, not an
+existing URL. The shared image validation and 512 KiB decoded-size limit above
+also apply to replacements. Uploaded objects use
+`advertisements/<random-uuid>.jpg|png|webp`; only their public URLs are stored.
+Create, update, and list responses expose `id`, `title`, `imageUrl`, `startsOn`,
+`endsOn`, and derived `status` (the upload input is `image`, not `imageUrl`).
+
+`startsOn` and `endsOn` must be real calendar dates in strict `YYYY-MM-DD`
+format, without a time or timezone suffix. `startsOn` must not be after
+`endsOn`; a same-day campaign is valid. Schedules include both dates and are
+evaluated using the server's current **Asia/Jakarta** calendar date:
+`scheduled` before `startsOn`, `active` from `startsOn` through `endsOn`, and
+`expired` after `endsOn`. Partial schedule edits are checked against the retained
+other date. Status is derived, not an editable JSON field.
+
+Failed database writes trigger cleanup of newly uploaded images. Replaced
+images and images belonging to deleted advertisements are removed only after
+the database transaction commits. Cleanup failures emit a sanitized warning
+without URLs, credentials, image bytes, or provider errors and do not fail the
+committed mutation; leftover objects may require manual removal.
+
+**Campaign dates restrict public API discovery, not access to public files.**
+Anyone who knows an image URL can fetch it before the campaign starts or after
+it expires. Expiration does not delete the row or image. Delete the advertisement
+to remove its row and attempt Storage cleanup; do not upload sensitive images.
 
 ## Deploy to Vercel
 

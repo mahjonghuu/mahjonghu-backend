@@ -10,6 +10,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { TablesModule } from './tables/tables.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
+import { AdvertisementsModule } from './advertisements/advertisements.module.js';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { DashboardModule } from './dashboard/dashboard.module.js';
     TablesModule,
     DashboardModule,
     OutletsModule,
+    AdvertisementsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

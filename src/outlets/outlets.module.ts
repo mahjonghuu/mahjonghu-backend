@@ -7,20 +7,16 @@ import { OutletEntity } from './entities/outlet.entity.js';
 import { OutletsController } from './outlets.controller.js';
 import { OutletsService } from './outlets.service.js';
 import { OutletAccessService } from './outlet-access.service.js';
-import { OutletPhotoStorage } from './outlet-photo.storage.js';
+import { ImageStorageModule } from '../common/storage/image-storage.module.js';
 
 @Module({
   imports: [
     AuthModule,
+    ImageStorageModule,
     TypeOrmModule.forFeature([OutletEntity, OutletAccessEntity]),
   ],
   controllers: [OutletsController],
-  providers: [
-    OutletsService,
-    OutletAccessService,
-    OutletPhotoStorage,
-    JWTAuthGuard,
-  ],
+  providers: [OutletsService, OutletAccessService, JWTAuthGuard],
   exports: [OutletsService, OutletAccessService],
 })
 export class OutletsModule {}

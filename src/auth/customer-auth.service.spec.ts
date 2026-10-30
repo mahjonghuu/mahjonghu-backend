@@ -45,7 +45,7 @@ function setup() {
   };
   const config = {
     get: vi.fn(
-      (key: string, fallback?: string) =>
+      (key: string, fallback?: string): string | undefined =>
         ({ RESEND_API_KEY: 'resend-key', EMAIL_FROM: 'noreply@example.com' })[
           key as 'RESEND_API_KEY' | 'EMAIL_FROM'
         ] ?? fallback,

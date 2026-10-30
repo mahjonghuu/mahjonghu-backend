@@ -20,7 +20,7 @@ In happy-hour mode each full booked hour is priced at the happy-hour rate if its
 
 - `outlets.controller.ts`: HTTP routes and UUID/body validation.
 - `outlets.service.ts`: outlet queries, persistence, and business rules.
-- `outlet-photo.storage.ts`: bounded raster validation and server-only Supabase Storage uploads/removals.
+- `../common/storage/supabase-image.storage.ts`: shared bounded raster validation and collection-isolated, server-only Supabase Storage uploads/removals.
 - `entities/outlet.entity.ts`: TypeORM mapping for the `outlets` table.
 - `dto/`: create and update request validation.
 - `outlets.service.spec.ts`: service unit tests for summary mapping, normalization, photo lifecycle and compensation, booking constraints, archive rules, and duplicate names.

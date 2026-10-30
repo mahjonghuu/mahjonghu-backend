@@ -6,20 +6,23 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-const MAX_PHOTO_BYTES = 512 * 1024;
+const MAX_IMAGE_BYTES = 512 * 1024;
 const GENERATED_OBJECT =
-  /^outlets\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(jpg|png|webp)$/;
+  /^(outlets|advertisements)\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(jpg|png|webp)$/;
 
-/** Stores validated outlet images; credentials never leave the backend. */
+/** Stores validated raster images in collection-specific buckets using server-only credentials. */
 @Injectable()
-export class OutletPhotoStorage {
+export class SupabaseImageStorage {
   constructor(private readonly config: ConfigService) {}
 
   /** Uploads a validated image and returns its public URL; rejects invalid data or unavailable Storage. */
-  async upload(photo: string): Promise<string> {
-    const { bytes, format } = this.decodePhoto(photo);
-    const { origin, bucket, key } = this.storageConfig();
-    const path = `outlets/${randomUUID()}.${format === 'jpeg' ? 'jpg' : format}`;
+  async upload(
+    image: string,
+    collection: 'outlets' | 'advertisements',
+  ): Promise<string> {
+    const { bytes, format } = this.decodeImage(image);
+    const { origin, bucket, key } = this.storageConfig(collection);
+    const path = `${collection}/${randomUUID()}.${format === 'jpeg' ? 'jpg' : format}`;
     await this.request(`${origin}/storage/v1/object/${bucket}/${path}`, {
       method: 'POST',
       headers: {
@@ -33,8 +36,11 @@ export class OutletPhotoStorage {
   }
 
   /** Deletes only a generated object in the configured bucket; rejects foreign or malformed URLs. */
-  async remove(url: string): Promise<void> {
-    const { origin, bucket, key } = this.storageConfig();
+  async remove(
+    url: string,
+    collection: 'outlets' | 'advertisements',
+  ): Promise<void> {
+    const { origin, bucket, key } = this.storageConfig(collection);
     const prefix = `${origin}/storage/v1/object/public/${bucket}/`;
     // Match the original string, not a URL-normalized pathname: dot segments,
     // escaped slashes, credentials, query strings and foreign origins are invalid.
@@ -42,8 +48,9 @@ export class OutletPhotoStorage {
       typeof url === 'string' && url.startsWith(prefix)
         ? url.slice(prefix.length)
         : '';
-    if (GENERATED_OBJECT.exec(path)?.[0] !== path || !path) {
-      throw new BadRequestException('URL foto outlet tidak valid.');
+    const match = GENERATED_OBJECT.exec(path);
+    if (!path || match?.[0] !== path || match[1] !== collection) {
+      throw new BadRequestException('Invalid image URL.');
     }
     await this.request(`${origin}/storage/v1/object/${bucket}`, {
       method: 'DELETE',
@@ -56,21 +63,21 @@ export class OutletPhotoStorage {
     });
   }
 
-  private decodePhoto(photo: string) {
+  private decodeImage(image: string) {
     const invalid = () =>
       new BadRequestException(
-        'Foto harus berupa JPEG, PNG, atau WebP base64 dengan ukuran maksimal 512 KiB.',
+        'Image must be a base64 JPEG, PNG, or WebP no larger than 512 KiB.',
       );
     // Bound the input before regex matching or decoding allocates memory.
-    if (typeof photo !== 'string' || photo.length > 699075) throw invalid();
+    if (typeof image !== 'string' || image.length > 699075) throw invalid();
     const match =
-      /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(photo);
-    if (!match || match[0] !== photo) throw invalid();
+      /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(image);
+    if (!match || match[0] !== image) throw invalid();
     const [, format, encoded] = match;
     if (encoded.length % 4 !== 0) throw invalid();
     const bytes = Buffer.from(encoded, 'base64');
     if (
-      bytes.length > MAX_PHOTO_BYTES ||
+      bytes.length > MAX_IMAGE_BYTES ||
       bytes.toString('base64') !== encoded
     ) {
       throw invalid();
@@ -92,16 +99,20 @@ export class OutletPhotoStorage {
     return { bytes, format };
   }
 
-  private storageConfig() {
+  private storageConfig(collection: 'outlets' | 'advertisements') {
     const unavailable = () =>
-      new ServiceUnavailableException(
-        'Penyimpanan foto outlet belum tersedia.',
-      );
+      new ServiceUnavailableException('Image storage is not configured.');
     const base = this.config.get<string>('SUPABASE_URL')?.trim();
     const key = this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY')?.trim();
     const bucket =
-      this.config.get<string>('SUPABASE_OUTLET_PHOTOS_BUCKET')?.trim() ||
-      'outlet-photos';
+      this.config
+        .get<string>(
+          collection === 'outlets'
+            ? 'SUPABASE_OUTLET_PHOTOS_BUCKET'
+            : 'SUPABASE_ADVERTISEMENT_IMAGES_BUCKET',
+        )
+        ?.trim() ||
+      (collection === 'outlets' ? 'outlet-photos' : 'advertisement-images');
     if (
       !base ||
       !key ||
@@ -140,9 +151,7 @@ export class OutletPhotoStorage {
       if (!response.ok) throw new Error('Storage request failed');
     } catch {
       // Storage response bodies and transport errors may contain secrets.
-      throw new ServiceUnavailableException(
-        'Penyimpanan foto outlet tidak tersedia.',
-      );
+      throw new ServiceUnavailableException('Image storage is unavailable.');
     }
   }
 }
