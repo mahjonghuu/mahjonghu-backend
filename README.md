@@ -215,6 +215,43 @@ the in-process expiry timer as a scheduled job. Availability and lookup
 already treat elapsed pending holds as expired, while status checks expire
 overdue payment sessions on access.
 
+### Supabase activity cron
+
+`vercel.json` schedules `GET /cron/supabase-keep-alive` with `0 0 */5 * *`.
+This is a UTC day-of-month schedule: days 1, 6, 11, 16, 21, 26, and 31 when
+present, nominally at 00:00 UTC (07:00 Jakarta). The gap is at most five days;
+it can be shorter across month boundaries, rather than a rolling 120-hour timer.
+Vercel runs scheduled cron requests against Production deployments, not local
+development or Preview deployments.
+
+Before deploying, generate a backend-only secret with `openssl rand -hex 32`
+and set it as `CRON_SECRET` in the backend Vercel project's Production environment,
+then redeploy. Never add it to the frontend or a `NEXT_PUBLIC_*` variable.
+[Vercel automatically sends the secret as a bearer header](https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs).
+Missing configuration, missing authorization, and incorrect tokens return `401`
+without querying the database.
+
+The authorized endpoint executes `SELECT id FROM outlets LIMIT 1` through the
+existing `DATABASE_URL` connection. It reads at most one row, makes no writes,
+returns only `{"ok":true}`, and disables response caching. An empty outlet table
+is valid; a failed query produces a failed HTTP response rather than false success.
+No additional Supabase Storage key, service-role key, or Nest scheduler is needed.
+
+After deployment, inspect **Settings → Cron Jobs** in the backend Vercel project
+and trigger the job manually to check its runtime logs. For a local smoke check,
+set `CRON_SECRET` in the backend environment, start the API, and run:
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  http://localhost:3001/cron/supabase-keep-alive
+```
+
+This creates periodic database activity, not a guarantee against Supabase pausing.
+It cannot resume an already paused project; resume that project in Supabase
+before relying on scheduled queries. Monitor failed invocations and check the
+current Supabase plan policy if uninterrupted availability is required.
+
 ## Authentication and authorization
 
 - `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile. Set `OWNER_COOKIE_DOMAIN` to the shared parent domain if the dashboard and API are on separate hosts; logout clears the cookie with the same scope. Tokens are not exposed in the JSON response. Invalid credentials and non-owner accounts receive the same `401` response.

@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build && npm run migration:deploy"
+  "buildCommand": "npm run build && npm run migration:deploy",
+  "crons": [
+    {
+      "path": "/cron/supabase-keep-alive",
+      "schedule": "0 0 */5 * *"
+    }
+  ]
 }
