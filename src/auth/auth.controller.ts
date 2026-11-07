@@ -1,6 +1,18 @@
-import { Body, Controller, Get, Post, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
-import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import {
+  DashboardAuthGuard,
+  type DashboardRequest,
+} from '../common/guards/dashboard-auth.guard.js';
 import { AuthService } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
 
@@ -30,10 +42,17 @@ function clearLegacyOwnerCookie(response: Response) {
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  /** Returns the current dashboard identity and scope. */
   @Get('me')
-  @UseGuards(JWTAuthGuard)
-  me() {
-    return { authenticated: true };
+  @Header('Cache-Control', 'no-store')
+  @UseGuards(DashboardAuthGuard)
+  me(@Req() request: DashboardRequest) {
+    const actor = request.dashboardActor!;
+    return {
+      authenticated: true,
+      role: actor.role,
+      outletId: actor.outletId,
+    };
   }
 
   @Post('login')

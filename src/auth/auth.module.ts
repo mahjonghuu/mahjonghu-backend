@@ -5,15 +5,22 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { DashboardAuthGuard } from '../common/guards/dashboard-auth.guard.js';
 import { UserEntity } from './entities/user.entity.js';
 import { CustomerAuthController } from './customer-auth.controller.js';
 import { CustomerAuthService } from './customer-auth.service.js';
 import { CustomerOtpEntity } from './entities/customer-otp.entity.js';
 import { CustomerOtpIpLimitEntity } from './entities/customer-otp-ip-limit.entity.js';
+import { OutletEntity } from '../outlets/entities/outlet.entity.js';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([UserEntity, CustomerOtpEntity, CustomerOtpIpLimitEntity]),
+    TypeOrmModule.forFeature([
+      UserEntity,
+      OutletEntity,
+      CustomerOtpEntity,
+      CustomerOtpIpLimitEntity,
+    ]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
@@ -30,7 +37,7 @@ import { CustomerOtpIpLimitEntity } from './entities/customer-otp-ip-limit.entit
     }),
   ],
   controllers: [AuthController, CustomerAuthController],
-  providers: [AuthService, CustomerAuthService, JWTAuthGuard],
+  providers: [AuthService, CustomerAuthService, JWTAuthGuard, DashboardAuthGuard],
   exports: [JwtModule, CustomerAuthService],
 })
 export class AuthModule {}

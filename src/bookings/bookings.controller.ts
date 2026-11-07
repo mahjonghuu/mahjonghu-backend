@@ -13,12 +13,16 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { CustomerAuthService } from '../auth/customer-auth.service.js';
+import {
+  DashboardAuthGuard,
+  type DashboardRequest,
+} from '../common/guards/dashboard-auth.guard.js';
 import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { BookingAvailabilityDto } from './dto/booking-availability.dto.js';
 import { BookingLookupDto } from './dto/booking-lookup.dto.js';
 import { BookingsService } from './bookings.service.js';
 
-/** Public availability and lookup, plus owner-only booking list and cancellation. */
+/** Public availability and lookup, plus owner/employee booking operations. */
 @Controller('bookings')
 export class BookingsController {
   constructor(
@@ -33,11 +37,14 @@ export class BookingsController {
     return this.bookings.lookupByPhone(dto.phone);
   }
 
-  /** Lists persisted bookings for the internal dashboard. */
-  @UseGuards(JWTAuthGuard)
+  /** Lists persisted bookings; employees only receive their assigned outlet. */
+  @UseGuards(DashboardAuthGuard)
   @Get()
-  findAllForDashboard() {
-    return this.bookings.findAllForDashboard();
+  findAllForDashboard(@Req() request: DashboardRequest) {
+    const actor = request.dashboardActor!;
+    return this.bookings.findAllForDashboard(
+      actor.role === 'employee' ? actor.outletId : null,
+    );
   }
 
   /** Cancels an eligible booking after the customer contacts the owner. */

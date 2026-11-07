@@ -11,6 +11,7 @@ import { TablesModule } from './tables/tables.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
 import { AdvertisementsModule } from './advertisements/advertisements.module.js';
+import { EmployeesModule } from './employees/employees.module.js';
 import { CronController } from './cron.controller.js';
 
 @Module({
@@ -33,6 +34,7 @@ import { CronController } from './cron.controller.js';
     DashboardModule,
     OutletsModule,
     AdvertisementsModule,
+    EmployeesModule,
   ],
   controllers: [AppController, CronController],
   providers: [AppService],

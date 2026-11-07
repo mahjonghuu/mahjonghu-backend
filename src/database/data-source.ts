@@ -12,6 +12,7 @@ import { MovePricingToOutlets1792108800000 } from './migrations/1792108800000-Mo
 import { AddHappyHourPricing1792195200000 } from './migrations/1792195200000-AddHappyHourPricing.js';
 import { AddOutletPhoto1792281600000 } from './migrations/1792281600000-AddOutletPhoto.js';
 import { AddAdvertisements1793318400000 } from './migrations/1793318400000-AddAdvertisements.js';
+import { AddEmployeeOutletAssignment1794096000000 } from './migrations/1794096000000-AddEmployeeOutletAssignment.js';
 
 // TypeORM CLI does not bootstrap Nest, so initialize Nest ConfigModule explicitly before the DataSource.
 await ConfigModule.forRoot({
@@ -36,5 +37,6 @@ export default new DataSource({
     AddHappyHourPricing1792195200000,
     AddOutletPhoto1792281600000,
     AddAdvertisements1793318400000,
+    AddEmployeeOutletAssignment1794096000000,
   ],
 });

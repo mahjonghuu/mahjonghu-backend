@@ -1,6 +1,6 @@
 # MahjongHu Backend
 
-NestJS API for public booking flows and internal owner operations. PostgreSQL is accessed through TypeORM; `synchronize` is disabled and schema changes use explicit migrations.
+NestJS API for public booking flows and internal owner/employee operations. PostgreSQL is accessed through TypeORM; `synchronize` is disabled and schema changes use explicit migrations.
 
 ## Setup
 
@@ -57,6 +57,8 @@ For a new account, use a parameterized statement from a trusted administrative c
 INSERT INTO users (auth_subject, email, password_hash, role, is_active)
 VALUES ($1, lower(btrim($2)), $3, 'owner', true);
 ```
+
+Employees do not need administrative SQL: an authenticated owner creates them through `POST /employees`, which hashes the temporary password and stores `role = 'employee'` with exactly one `outlet_id`. Owners can reassign or deactivate the account later; deactivation preserves historical references.
 
 ## Image storage
 
@@ -254,14 +256,16 @@ current Supabase plan policy if uninterrupted availability is required.
 
 ## Authentication and authorization
 
-- `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile. Set `OWNER_COOKIE_DOMAIN` to the shared parent domain if the dashboard and API are on separate hosts; logout clears the cookie with the same scope. Tokens are not exposed in the JSON response. Invalid credentials and non-owner accounts receive the same `401` response.
+- `POST /auth/login` accepts `{ "email": "owner@example.com", "password": "..." }`. For active owners and employees with valid bcrypt credentials, it sets an eight-hour `HttpOnly`, `SameSite=Strict` `ownerToken` cookie and returns the user profile, including `role` and `outletId` for employees. Set `OWNER_COOKIE_DOMAIN` to the shared parent domain if the dashboard and API are on separate hosts; logout clears the cookie with the same scope. Tokens are not exposed in the JSON response. Invalid credentials, inactive accounts, and unassigned employees receive the same `401` response.
 - `POST /auth/logout` clears the session cookie.
-- `GET /auth/me` validates the JWT cookie or `Authorization: Bearer <token>` (used by the Next.js proxy).
+- `GET /auth/me` validates the JWT cookie or `Authorization: Bearer <token>` (used by the Next.js proxy) and returns `{ authenticated, role, outletId }` with `Cache-Control: no-store`. The backend re-reads the user and outlet assignment from PostgreSQL so deactivation and reassignment take effect on the next request.
+- Owner-only `GET`, `POST`, `PATCH`, and `DELETE /employees` provision accounts. Create accepts `{ email, password, outletId }`; update accepts optional `email`, `password`, `outletId`, and `isActive`; DELETE deactivates without deleting the account. Passwords are hashed with bcrypt and never returned. An employee has exactly one outlet; an outlet may have many employees.
 - `POST /auth/customer/request-code` sends a six-digit single-use code through Resend only when the active customer email has an unexpired grant to an active, non-archived outlet. Emails without eligible outlet access receive `403` with `Email tidak terdaftar.` and no challenge or email is created. `RESEND_API_KEY` and `EMAIL_FROM` are required; codes expire after ten minutes. PostgreSQL enforces per-email cooldown and hourly limits for eligible addresses, per-IP hourly limits for all requests, and five verification attempts.
 - `POST /auth/customer/verify-code` accepts `{ "email": "...", "code": "123456" }`, consumes the code atomically and sets an eight-hour `HttpOnly` `customerToken` cookie. `GET /auth/customer/me` returns `{ authenticated, user }`; `POST /auth/customer/logout` clears that cookie. Customer JWTs cannot authorize owner routes, and owner JWTs cannot authorize customer-only access.
 - `GET /outlets/public` lists active, non-archived public outlets plus private outlets granted to the signed-in customer. `GET /outlets` and outlet mutations require an owner JWT.
 - `GET /tables/public` lists tables belonging only to those accessible active outlets. `GET /tables` and table mutations require an owner JWT.
-- Role authorization is enforced by the backend from verified JWT claims. The Next.js `proxy.ts` also asks the backend to validate the session before serving dashboard routes; backend API guards remain the authorization boundary.
+- `GET /bookings` is available to owners and employees; employees receive only bookings for their assigned outlet. `PATCH /bookings/:id/cancel` remains owner-only.
+- Role authorization is enforced by the backend from verified JWT claims plus a fresh PostgreSQL lookup of the user's active status and outlet assignment. The Next.js `proxy.ts` also asks the backend to validate the session before serving dashboard routes; backend API guards remain the authorization boundary.
 
 Browser requests use credentialed CORS from the configured `WEB_ORIGIN`. The web app and API must be same-site for the strict cookie policy; cookie-authenticated mutations also require the exact configured origin. JWT signing and verification require `JWT_SECRET`; the application refuses to start without it.
 
@@ -291,8 +295,10 @@ guest checkout. Backend checkout rechecks access before creating any hold.
 
 ## API and operation
 
-- `GET /outlets` lists non-archived outlets. `POST /outlets`, `PATCH /outlets/:id`, and `DELETE /outlets/:id` manage outlets; archival is rejected if tables or booking history reference them. Every outlet has a base whole-IDR hourly `rate` and a single `pricingMode` (`duration` by default for existing/new outlets, or `happy_hour`). Duration mode uses optional ascending `rateTiers` of `{ durationHours, rate }` thresholds (2–10 hours): the greatest eligible hourly tier prices the entire booking. Happy-hour mode requires `happyHour: { days: [1, 3, 5], startHour: 16, endHour: 19, rate: 60000 }` (unique ISO weekdays Monday=1 through Sunday=7; whole-hour window with 0–23 start and 1–24 end). It charges each full booked hour at the configured rate only when that hour falls within a selected outlet-local weekday/window, and the base rate otherwise, including hours after midnight. Switching modes clears the inactive configuration; switching back requires a new happy-hour configuration. Checkout authoritatively sums each booking and snapshots its total into booking, payment, and DOKU session amounts.
-- `GET /tables` lists non-archived tables with booking-derived occupancy. `POST /tables`, `PATCH /tables/:id`, and `DELETE /tables/:id` manage tables; occupancy cannot be set manually. All tables in an outlet use its shared rate schedule; table routes do not accept prices.
+- `GET /employees` lists employee accounts with their assigned outlet; `POST /employees` creates one, `PATCH /employees/:id` updates credentials/assignment/activation, and `DELETE /employees/:id` deactivates it. All four routes require an owner JWT. `includeInactive=false` hides deactivated accounts; `outletId` filters the list. An employee email is unique case-insensitively, and the password is bcrypt-hashed before storage.
+- `GET /bookings` lists persisted bookings for owners, or only the assigned outlet for employees. Employees use this read-only history view; cancellation remains owner-only via `PATCH /bookings/:id/cancel`.
+- `GET /outlets` lists non-archived outlets for owners. `POST /outlets`, `PATCH /outlets/:id`, and `DELETE /outlets/:id` manage outlets; archival is rejected if tables or booking history reference them. Every outlet has a base whole-IDR hourly `rate` and a single `pricingMode` (`duration` by default for existing/new outlets, or `happy_hour`). Duration mode uses optional ascending `rateTiers` of `{ durationHours, rate }` thresholds (2–10 hours): the greatest eligible hourly tier prices the entire booking. Happy-hour mode requires `happyHour: { days: [1, 3, 5], startHour: 16, endHour: 19, rate: 60000 }` (unique ISO weekdays Monday=1 through Sunday=7; whole-hour window with 0–23 start and 1–24 end). It charges each full booked hour at the configured rate only when that hour falls within a selected outlet-local weekday/window, and the base rate otherwise, including hours after midnight. Switching modes clears the inactive configuration; switching back requires a new happy-hour configuration. Checkout authoritatively sums each booking and snapshots its total into booking, payment, and DOKU session amounts.
+- `GET /tables` lists non-archived tables with booking-derived occupancy. `POST /tables`, `PATCH /tables/:id`, and `DELETE /tables/:id` manage tables; occupancy cannot be set manually. All tables in an outlet use its shared rate schedule; table routes do not accept prices. These routes require an owner JWT.
 - `GET /bookings/availability` provides public slot discovery. All guest reservations are created together with a DOKU payment session through the checkout endpoints above; standalone unpaid `POST /bookings` is not exposed.
 - Opening and closing hours are configured per outlet in whole hours (default 12:00–22:00); public discovery returns them, and checkout rejects sessions outside those hours. A closing hour earlier than opening (for example, 13:00–04:00) closes on the next calendar day; `closingHour: 0` means next-day midnight when opening is later, while `closingHour: 24` means same-day midnight. Equal opening and closing hours are invalid. Apply pending migrations before accepting overnight outlet updates so the database constraint matches the API.
 - `POST /payments/doku/dev/checkout` creates one sandbox DOKU Checkout for all selected table sessions; `/prod/checkout` uses the separate production credentials. Each server-created booking hold and the DOKU checkout deadline use the provider's 15-minute expiry.

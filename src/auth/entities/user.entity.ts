@@ -17,7 +17,11 @@ export class UserEntity {
   passwordHash!: string | null;
 
   @Column({ type: 'varchar', length: 10 })
-  role!: 'customer' | 'owner';
+  role!: 'customer' | 'owner' | 'employee';
+
+  /** Outlet assigned to an employee; owners and customers keep this null. */
+  @Column({ name: 'outlet_id', type: 'uuid', nullable: true })
+  outletId!: string | null;
 
   @Column({ name: 'is_active', type: 'boolean' })
   isActive!: boolean;

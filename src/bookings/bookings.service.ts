@@ -109,9 +109,9 @@ export class BookingsService {
       }>();
   }
 
-  /** Lists booking details for the internal dashboard, including customer contact. */
-  async findAllForDashboard() {
-    return this.bookings
+  /** Lists booking details for the internal dashboard, optionally for one employee outlet. */
+  async findAllForDashboard(outletId: string | null = null) {
+    const query = this.bookings
       .createQueryBuilder('booking')
       .innerJoin(OutletEntity, 'outlet', 'outlet.id = booking.outletId')
       .innerJoin(TableEntity, 'table', 'table.id = booking.tableId')
@@ -129,8 +129,11 @@ export class BookingsService {
       .addSelect('booking.totalAmountIdr', 'totalAmountIdr')
       .addSelect('booking.status', 'status')
       .addSelect('booking.holdExpiresAt', 'holdExpiresAt')
-      .orderBy('booking.startsAt', 'DESC')
-      .getRawMany();
+      .orderBy('booking.startsAt', 'DESC');
+    if (outletId) {
+      query.andWhere('booking.outletId = :outletId', { outletId });
+    }
+    return query.getRawMany();
   }
 
   /** Releases a future booking without changing its DOKU charge or payment session. */

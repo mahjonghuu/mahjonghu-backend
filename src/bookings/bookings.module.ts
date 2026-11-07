@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
+import { DashboardAuthGuard } from '../common/guards/dashboard-auth.guard.js';
 import { JWTAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OutletsModule } from '../outlets/outlets.module.js';
@@ -16,7 +17,7 @@ import { BookingEntity } from './entities/booking.entity.js';
     TypeOrmModule.forFeature([BookingEntity, TableEntity, OutletEntity]),
   ],
   controllers: [BookingsController],
-  providers: [BookingsService, JWTAuthGuard],
+  providers: [BookingsService, DashboardAuthGuard, JWTAuthGuard],
   exports: [BookingsService],
 })
 export class BookingsModule {}
